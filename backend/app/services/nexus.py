@@ -91,20 +91,26 @@ class NexusService:
         raw_message: str,
         user_profile: dict[str, Any] | None = None,
         temperature: float = 0.7,
+        db: Any | None = None,
     ) -> dict[str, Any]:
         """
         Full conversation-aware chat with Nexus.
 
-        Routes the message through the ConversationEngine to:
-        1. Resolve pronouns and references
-        2. Detect domain, intent, and tone
-        3. Inject conversation history into the LLM call
-        4. Polish the response to match user's style
-        5. Record the exchange for future context
+        Pipeline:
+        1. Conversation engine  — resolve references, detect domain/intent/tone
+        2. RAG retrieval        — inject semantically relevant past memories
+        3. Persistent session   — load DB session context + summary
+        4. Learning context     — adapt to user's skill level and preferences
+        5. Reasoning context    — structured guidance for complex queries
+        6. LLM call             — full context-aware completion
+        7. Response polishing   — match user's tone
+        8. Persist              — save turns to DB, update vector memory + learner
         """
         from app.services.conversation import conversation_engine
         from app.services.learning import learning_service
         from app.services.reasoning import reasoning_service
+        from app.services.rag import rag_service
+        from app.services.session_store import session_store
 
         # 1. Conversation processing — resolve references, detect domain/intent/tone
         processed = conversation_engine.process_input(user_id, raw_message)
@@ -115,20 +121,42 @@ class NexusService:
         if profile_note:
             base_system += f"\n\nUser profile: {profile_note}"
 
-        # 3. Inject learning context — what this user knows and prefers
+        # 3. RAG — retrieve semantically relevant past exchanges and facts
+        rag_ctx = rag_service.retrieve_context(
+            user_id=user_id,
+            query=processed.resolved_message,
+            domain=processed.domain,
+        )
+        if rag_ctx:
+            base_system += f"\n\n{rag_ctx}"
+
+        # 4. Persistent session context — compressed summary of earlier turns
+        db_session = None
+        db_session_id: str | None = None
+        if db is not None:
+            try:
+                db_session = await session_store.get_or_create(db, user_id)
+                db_session_id = str(db_session.id)
+                session_ctx = session_store.build_context_with_summary(db_session)
+                if session_ctx:
+                    base_system += f"\n\n{session_ctx}"
+            except Exception:
+                pass  # DB errors must not break chat
+
+        # 5. Inject learning context — what this user knows and prefers
         learning_ctx = learning_service.build_learning_context(user_id, processed.domain)
         if learning_ctx:
             base_system += f"\n\nLearning context: {learning_ctx}"
 
-        # 4. Inject reasoning context for complex multi-step queries
+        # 6. Inject reasoning context for complex multi-step queries
         reasoning_ctx = reasoning_service.build_reasoning_context(processed.resolved_message)
         if reasoning_ctx:
             base_system += f"\n\nReasoning guidance: {reasoning_ctx}"
 
-        # 5. Build full context-aware system prompt
+        # 7. Build full context-aware system prompt
         system_prompt = processed.build_system_prompt(base_system)
 
-        # 6. LLM call with full conversation history
+        # 8. LLM call with full conversation history
         raw_response = await self.complete(
             user_message=processed.resolved_message,
             system_context=system_prompt,
@@ -136,10 +164,10 @@ class NexusService:
             temperature=temperature,
         )
 
-        # 7. Polish response to match user's tone
+        # 9. Polish response to match user's tone
         polished = conversation_engine.polish_response(user_id, raw_response, raw_message)
 
-        # 8. Record in session and update learner
+        # 10. Record in in-memory session and update learner
         conversation_engine.record_response(user_id, polished)
         learning_service.record_interaction(
             user_id=user_id,
@@ -149,6 +177,38 @@ class NexusService:
             intent=processed.intent,
         )
 
+        # 11. Persist turns to DB session (non-blocking on error)
+        if db is not None and db_session is not None:
+            try:
+                await session_store.add_turn(
+                    db, db_session, "user", raw_message,
+                    domain=processed.domain, intent=processed.intent,
+                )
+                await session_store.add_turn(
+                    db, db_session, "assistant", polished,
+                    domain=processed.domain,
+                )
+            except Exception:
+                pass
+
+        # 12. Persist turn + extract knowledge into vector memory (non-blocking)
+        try:
+            rag_service.store_turn(
+                user_id=user_id,
+                user_message=raw_message,
+                ai_response=polished,
+                domain=processed.domain,
+                intent=processed.intent,
+            )
+            rag_service.extract_and_store_knowledge(
+                user_id=user_id,
+                user_message=raw_message,
+                ai_response=polished,
+                domain=processed.domain,
+            )
+        except Exception:
+            pass  # vector store errors must never break the chat response
+
         return {
             "response": polished,
             "domain": processed.domain,
@@ -157,7 +217,8 @@ class NexusService:
             "needs_clarification": processed.needs_clarification,
             "suggestions": processed.suggestions,
             "context": processed.to_dict(),
-            "engine": "nexus-conversation-v1.2",
+            "session_id": db_session_id,
+            "engine": "nexus-conversation-v1.4",
         }
 
     async def personalized_recommendation(

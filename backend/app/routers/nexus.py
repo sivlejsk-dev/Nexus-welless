@@ -11,15 +11,19 @@ All chat messages pass through the ConversationEngine (Task 1.1):
 
 import json
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from app.db.base import get_db
 from app.middleware.auth import get_current_user
 from app.models.user import User
 from app.schemas.wellness import NexusRecommendationRequest, NexusRecommendationResponse
 from app.services.conversation import conversation_engine
 from app.services.learning import learning_service
 from app.services.reasoning import reasoning_service
+from app.services.rag import rag_service
+from app.services.session_store import session_store
 from app.services.nexus import nexus_service
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/nexus", tags=["nexus-ai"])
 
@@ -28,11 +32,13 @@ router = APIRouter(prefix="/nexus", tags=["nexus-ai"])
 async def chat(
     message: str = Body(..., embed=True),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Full conversation-aware chat with Nexus.
     Remembers context, resolves references, detects domain and intent,
     adapts tone. Covers wellness, astrology, finance, and options trading.
+    Turns are persisted to the DB and retrievable via /nexus/sessions.
     """
     profile = current_user.profile
     profile_dict: dict = {}
@@ -49,6 +55,7 @@ async def chat(
         user_id=str(current_user.id),
         raw_message=message,
         user_profile=profile_dict,
+        db=db,
     )
     return result
 
@@ -162,3 +169,146 @@ async def analyze_problem(
 ):
     """Lightweight problem analysis — complexity score, key questions, constraints."""
     return reasoning_service.analyze(problem)
+
+
+# ── Vector memory / RAG endpoints (Task 1.4) ──────────────────────────────────
+
+@router.get("/memory/stats")
+async def get_memory_stats(current_user: User = Depends(get_current_user)):
+    """Return vector memory usage stats for the current user."""
+    return {
+        "user_id": str(current_user.id),
+        **rag_service.get_memory_stats(str(current_user.id)),
+    }
+
+
+@router.post("/memory/search")
+async def search_memory(
+    query: str = Body(..., embed=True),
+    domain: str | None = Body(None, embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Semantic search over the user's stored conversation history and knowledge.
+
+    Returns the most relevant past exchanges and facts for a given query.
+    Useful for surfacing forgotten context or auditing what Nexus remembers.
+    """
+    from app.services.vector_memory import vector_memory
+
+    results = vector_memory.search_all(
+        user_id=str(current_user.id),
+        query=query,
+        n_results=8,
+        domain_filter=domain,
+    )
+    return {
+        "query": query,
+        "domain_filter": domain,
+        "conversations": results["conversations"],
+        "knowledge": results["knowledge"],
+    }
+
+
+@router.post("/memory/store")
+async def store_knowledge(
+    fact: str = Body(..., embed=True),
+    domain: str = Body("general", embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually store a fact or insight into the user's knowledge base.
+
+    Nexus will retrieve this during future conversations when relevant.
+    """
+    from app.services.vector_memory import vector_memory
+
+    kid = vector_memory.store_knowledge(
+        user_id=str(current_user.id),
+        fact=fact,
+        domain=domain,
+        source="manual",
+    )
+    return {"stored": True, "knowledge_id": kid, "fact": fact, "domain": domain}
+
+
+@router.delete("/memory")
+async def clear_vector_memory(current_user: User = Depends(get_current_user)):
+    """
+    Delete all vector memory for the current user.
+
+    Removes both conversation history and knowledge from ChromaDB.
+    This cannot be undone.
+    """
+    rag_service.delete_user_memory(str(current_user.id))
+    return {"cleared": True, "user_id": str(current_user.id)}
+
+
+# ── Persistent session endpoints (Task 1.5) ───────────────────────────────────
+
+@router.get("/sessions")
+async def list_sessions(
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the user's conversation sessions, most recent first."""
+    sessions = await session_store.list_sessions(db, current_user.id, limit=limit)
+    return {
+        "user_id": str(current_user.id),
+        "sessions": [session_store.session_to_dict(s) for s in sessions],
+        "count": len(sessions),
+    }
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_detail(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return full detail for a specific session including live turns."""
+    sess = await session_store.get_session(db, session_id)
+    if sess is None or str(sess.user_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    turns = await session_store.get_live_turns(db, sess.id)
+    return {
+        **session_store.session_to_dict(sess),
+        "summary": sess.summary,
+        "turns": [
+            {
+                "turn_index": t.turn_index,
+                "role": t.role,
+                "content": t.content,
+                "domain": t.domain,
+                "intent": t.intent,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in turns
+        ],
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a specific conversation session and all its turns."""
+    sess = await session_store.get_session(db, session_id)
+    if sess is None or str(sess.user_id) != str(current_user.id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    await session_store.delete_session(db, session_id)
+    return {"deleted": True, "session_id": session_id}
+
+
+@router.delete("/sessions")
+async def delete_all_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all conversation sessions for the current user."""
+    count = await session_store.delete_all_sessions(db, current_user.id)
+    return {"deleted": count, "user_id": str(current_user.id)}
