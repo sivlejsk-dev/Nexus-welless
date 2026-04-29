@@ -103,30 +103,51 @@ class NexusService:
         5. Record the exchange for future context
         """
         from app.services.conversation import conversation_engine
+        from app.services.learning import learning_service
+        from app.services.reasoning import reasoning_service
 
-        # Process through conversation engine
+        # 1. Conversation processing — resolve references, detect domain/intent/tone
         processed = conversation_engine.process_input(user_id, raw_message)
 
-        # Build context-aware system prompt
+        # 2. Build base system prompt with user profile
         profile_note = _format_profile(user_profile or {})
         base_system = SYSTEM_PROMPT
         if profile_note:
             base_system += f"\n\nUser profile: {profile_note}"
+
+        # 3. Inject learning context — what this user knows and prefers
+        learning_ctx = learning_service.build_learning_context(user_id, processed.domain)
+        if learning_ctx:
+            base_system += f"\n\nLearning context: {learning_ctx}"
+
+        # 4. Inject reasoning context for complex multi-step queries
+        reasoning_ctx = reasoning_service.build_reasoning_context(processed.resolved_message)
+        if reasoning_ctx:
+            base_system += f"\n\nReasoning guidance: {reasoning_ctx}"
+
+        # 5. Build full context-aware system prompt
         system_prompt = processed.build_system_prompt(base_system)
 
-        # Call LLM with full conversation history
+        # 6. LLM call with full conversation history
         raw_response = await self.complete(
             user_message=processed.resolved_message,
             system_context=system_prompt,
-            history=processed.history[:-1],  # exclude the turn we just added
+            history=processed.history[:-1],
             temperature=temperature,
         )
 
-        # Polish response to match user's tone
+        # 7. Polish response to match user's tone
         polished = conversation_engine.polish_response(user_id, raw_response, raw_message)
 
-        # Record AI response in session
+        # 8. Record in session and update learner
         conversation_engine.record_response(user_id, polished)
+        learning_service.record_interaction(
+            user_id=user_id,
+            user_input=raw_message,
+            ai_response=polished,
+            domain=processed.domain,
+            intent=processed.intent,
+        )
 
         return {
             "response": polished,
@@ -136,7 +157,7 @@ class NexusService:
             "needs_clarification": processed.needs_clarification,
             "suggestions": processed.suggestions,
             "context": processed.to_dict(),
-            "engine": "nexus-conversation-v1",
+            "engine": "nexus-conversation-v1.2",
         }
 
     async def personalized_recommendation(

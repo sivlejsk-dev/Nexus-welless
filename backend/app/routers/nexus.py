@@ -17,6 +17,8 @@ from app.middleware.auth import get_current_user
 from app.models.user import User
 from app.schemas.wellness import NexusRecommendationRequest, NexusRecommendationResponse
 from app.services.conversation import conversation_engine
+from app.services.learning import learning_service
+from app.services.reasoning import reasoning_service
 from app.services.nexus import nexus_service
 
 router = APIRouter(prefix="/nexus", tags=["nexus-ai"])
@@ -104,3 +106,59 @@ async def analyze_message(
     """
     processed = conversation_engine.process_input(str(current_user.id), message)
     return processed.to_dict()
+
+
+# ── Learning endpoints (Task 1.2) ─────────────────────────────────────────────
+
+@router.get("/skills")
+async def get_skill_profile(current_user: User = Depends(get_current_user)):
+    """
+    Return the user's skill proficiency profile across all Nexus domains.
+    Shows how Nexus has learned to adapt to this user over time.
+    """
+    return {
+        "user_id": str(current_user.id),
+        "profile": learning_service.get_skill_profile(str(current_user.id)),
+        "insights": learning_service.get_insights(str(current_user.id)),
+        "recommendations": learning_service.get_recommendations(str(current_user.id))[:3],
+    }
+
+
+@router.get("/skills/concepts")
+async def get_related_concepts(
+    concept: str = Query(..., description="Topic to find related concepts for"),
+    current_user: User = Depends(get_current_user),
+):
+    """Return concepts related to a topic from the user's personal knowledge graph."""
+    related = learning_service.get_related_concepts(str(current_user.id), concept)
+    return {"concept": concept, "related": related}
+
+
+# ── Reasoning endpoints (Task 1.3) ────────────────────────────────────────────
+
+@router.post("/reason")
+async def reason(
+    problem: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Run structured multi-framework reasoning on a complex problem.
+
+    Uses deductive, inductive, abductive, and causal reasoning to:
+    - Decompose the problem into components
+    - Generate multiple solution approaches
+    - Return the best solution with confidence scores
+
+    Ideal for: options strategy selection, detox protocol design,
+    nutritional planning, astrological timing analysis.
+    """
+    return reasoning_service.reason(problem)
+
+
+@router.post("/reason/analyze")
+async def analyze_problem(
+    problem: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """Lightweight problem analysis — complexity score, key questions, constraints."""
+    return reasoning_service.analyze(problem)
