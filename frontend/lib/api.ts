@@ -123,10 +123,64 @@ export const nexus = {
       body: JSON.stringify({ module, context, user_message }),
     }),
   chat: (message: string) =>
-    request<{ response: string }>(`/nexus/chat?message=${encodeURIComponent(message)}`, {
+    request<NexusChatResponse>("/nexus/chat", {
       method: "POST",
+      body: JSON.stringify({ message }),
     }),
 };
+
+// ── Voice ─────────────────────────────────────────────────────────────────────
+
+/** Upload audio blob and get back transcript + Nexus response + optional MP3. */
+export async function voiceChat(
+  audioBlob: Blob,
+  opts: { voice?: string; ttsEnabled?: boolean; language?: string } = {}
+): Promise<VoiceChatResponse> {
+  const token = getToken();
+  const form = new FormData();
+  form.append("audio", audioBlob, "audio.webm");
+  form.append("voice", opts.voice ?? "nova");
+  form.append("tts_enabled", String(opts.ttsEnabled ?? true));
+  if (opts.language) form.append("language", opts.language);
+
+  const res = await fetch(`${API}/voice/chat`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Voice chat failed");
+  }
+  return res.json();
+}
+
+/** Transcribe audio only (no chat). */
+export async function transcribeAudio(
+  audioBlob: Blob,
+  language?: string
+): Promise<{ transcript: string; language: string | null; configured: boolean }> {
+  const token = getToken();
+  const form = new FormData();
+  form.append("audio", audioBlob, "audio.webm");
+  if (language) form.append("language", language);
+
+  const res = await fetch(`${API}/voice/transcribe`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Transcription failed");
+  }
+  return res.json();
+}
+
+/** Fetch voice capability config. */
+export async function getVoiceConfig(): Promise<VoiceConfig> {
+  return request<VoiceConfig>("/voice/config");
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface User {
@@ -296,4 +350,31 @@ export interface NexusResponse {
   action_items: string[];
   references: string[];
   confidence?: number;
+}
+
+export interface NexusChatResponse {
+  response: string;
+  domain: string;
+  intent: string;
+  session_id: string | null;
+  engine: string;
+}
+
+export interface VoiceChatResponse {
+  transcript: string;
+  response_text: string;
+  audio_b64: string | null;   // base64 MP3 from server TTS
+  domain: string;
+  intent: string;
+  session_id: string | null;
+  tts_available: boolean;
+}
+
+export interface VoiceConfig {
+  stt_available: boolean;
+  tts_available: boolean;
+  available_voices: string[];
+  default_voice: string;
+  supported_formats: string[];
+  max_audio_mb: number;
 }

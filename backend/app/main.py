@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
-from app.routers import astrology, auth, detox, meditation, nexus, nutrition, users
+from app.routers import astrology, auth, detox, meditation, nexus, nutrition, users, voice
 
 log = structlog.get_logger()
 
@@ -67,6 +67,7 @@ app.include_router(nutrition.router, prefix=API_PREFIX)
 app.include_router(astrology.router, prefix=API_PREFIX)
 app.include_router(detox.router, prefix=API_PREFIX)
 app.include_router(nexus.router, prefix=API_PREFIX)
+app.include_router(voice.router, prefix=API_PREFIX)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────
