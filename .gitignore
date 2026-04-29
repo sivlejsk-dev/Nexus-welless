@@ -63,3 +63,5 @@ media/
 *.pem
 *.key
 *.cert
+nexus_ai_source/
+*.db

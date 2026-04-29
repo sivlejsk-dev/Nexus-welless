@@ -1,0 +1,66 @@
+"""Application configuration loaded from environment variables."""
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import AnyHttpUrl, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # ── App ──────────────────────────────────────────────────
+    environment: Literal["development", "staging", "production"] = "development"
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    # ── Database ─────────────────────────────────────────────
+    database_url: str = "postgresql+asyncpg://nexus:nexus_secret@localhost:5432/nexus_wellness"
+
+    # ── Redis ────────────────────────────────────────────────
+    redis_url: str = "redis://localhost:6379/0"
+
+    # ── Auth ─────────────────────────────────────────────────
+    jwt_secret_key: str = "dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+    refresh_token_expire_days: int = 30
+
+    # ── Nexus AI ─────────────────────────────────────────────
+    nexus_api_key: str = ""
+    nexus_api_base_url: str = "https://api.nexus-ai.example.com/v1"
+    nexus_model: str = "nexus-core-v1"
+
+    # ── External APIs ────────────────────────────────────────
+    usda_api_key: str = ""
+    usda_api_base_url: str = "https://api.nal.usda.gov/fdc/v1"
+
+    astrology_api_key: str = ""
+    astrology_api_base_url: str = "https://api.astrology-engine.example.com/v1"
+
+    # ── Storage ──────────────────────────────────────────────
+    storage_backend: Literal["local", "s3", "gcs"] = "local"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_s3_bucket: str = "nexus-wellness-media"
+    aws_region: str = "us-east-1"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors(cls, v: str | list) -> list[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",")]
+        return v
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

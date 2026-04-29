@@ -1,0 +1,299 @@
+/**
+ * Typed API client for the Nexus Wellness backend.
+ * All requests include the JWT from localStorage when available.
+ */
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = `${BASE_URL}/api/v1`;
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("nexus_access_token");
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string>),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API}${path}`, { ...options, headers });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail ?? "Request failed");
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const auth = {
+  register: (email: string, password: string, full_name?: string) =>
+    request<{ access_token: string; refresh_token: string }>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, full_name }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ access_token: string; refresh_token: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+};
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+export const users = {
+  me: () => request<User>("/users/me"),
+  getProfile: () => request<WellnessProfile>("/users/me/profile"),
+  updateProfile: (data: Partial<WellnessProfile>) =>
+    request<WellnessProfile>("/users/me/profile", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+};
+
+// ── Meditation ────────────────────────────────────────────────────────────────
+export const meditation = {
+  guides: (params?: { category?: string; tag?: string; level?: string }) => {
+    const q = new URLSearchParams(params as Record<string, string>).toString();
+    return request<MeditationGuide[]>(`/meditation/guides${q ? `?${q}` : ""}`);
+  },
+  guide: (id: string) => request<MeditationGuide>(`/meditation/guides/${id}`),
+  recommended: () => request<MeditationGuide[]>("/meditation/recommended"),
+  nexusInsight: () => request<NexusResponse>("/meditation/nexus-insight"),
+  logSession: (data: SessionLog) =>
+    request<SessionLog>("/meditation/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
+
+// ── Nutrition ─────────────────────────────────────────────────────────────────
+export const nutrition = {
+  search: (q: string, limit = 10) =>
+    request<{ results: FoodResult[]; count: number }>(
+      `/nutrition/search?q=${encodeURIComponent(q)}&limit=${limit}`
+    ),
+  healingFoods: (condition: string) =>
+    request<{ condition: string; foods: HealingFood[] }>(
+      `/nutrition/healing-foods?condition=${encodeURIComponent(condition)}`
+    ),
+  mealPlan: (focus = "anti-inflammatory", days = 7) =>
+    request<MealPlan[]>(`/nutrition/meal-plan?focus=${focus}&days=${days}`),
+  recommendation: (condition: string) =>
+    request<NutritionRec>(`/nutrition/recommendation?condition=${encodeURIComponent(condition)}`),
+};
+
+// ── Astrology ─────────────────────────────────────────────────────────────────
+export const astrology = {
+  horoscope: (sign: string) =>
+    request<Horoscope>(`/astrology/horoscope/${sign}`),
+  myHoroscope: () => request<Horoscope>("/astrology/horoscope/me/today"),
+  myChart: () => request<BirthChart>("/astrology/my-chart"),
+  signs: () => request<SignProfile[]>("/astrology/signs"),
+};
+
+// ── Detox ─────────────────────────────────────────────────────────────────────
+export const detox = {
+  protocols: (intensity?: string) =>
+    request<DetoxProtocol[]>(
+      `/detox/protocols${intensity ? `?intensity=${intensity}` : ""}`
+    ),
+  protocol: (id: string) => request<DetoxProtocol>(`/detox/protocols/${id}`),
+  dayGuidance: (protocolId: string, day: number) =>
+    request<DayGuidance>(`/detox/protocols/${protocolId}/day/${day}`),
+  recommended: () => request<DetoxProtocol>("/detox/recommended"),
+  logDay: (data: DetoxLogEntry) =>
+    request<DetoxLogEntry>("/detox/logs", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
+
+// ── Nexus AI ──────────────────────────────────────────────────────────────────
+export const nexus = {
+  recommend: (module: string, context: Record<string, unknown> = {}, user_message?: string) =>
+    request<NexusResponse>("/nexus/recommend", {
+      method: "POST",
+      body: JSON.stringify({ module, context, user_message }),
+    }),
+  chat: (message: string) =>
+    request<{ response: string }>(`/nexus/chat?message=${encodeURIComponent(message)}`, {
+      method: "POST",
+    }),
+};
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface User {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  is_verified: boolean;
+}
+
+export interface WellnessProfile {
+  date_of_birth?: string;
+  birth_time?: string;
+  birth_location?: string;
+  birth_lat?: number;
+  birth_lon?: number;
+  timezone?: string;
+  height_cm?: number;
+  weight_kg?: number;
+  dietary_preferences?: string[];
+  health_goals?: string[];
+  allergies?: string[];
+  conditions?: string[];
+  sun_sign?: string;
+  moon_sign?: string;
+  rising_sign?: string;
+}
+
+export interface MeditationGuide {
+  id: string;
+  title: string;
+  description: string;
+  duration_minutes: number;
+  category: string;
+  level: string;
+  tags: string[];
+  audio_url: string | null;
+  thumbnail_url: string | null;
+  script?: string[];
+}
+
+export interface SessionLog {
+  guide_id: string;
+  duration_seconds: number;
+  completed: boolean;
+  mood_before?: number;
+  mood_after?: number;
+  notes?: string;
+}
+
+export interface FoodResult {
+  fdcId: number;
+  description: string;
+  brandOwner?: string;
+  foodCategory?: string;
+  foodNutrients?: Array<{ nutrientName: string; value: number; unitName: string }>;
+}
+
+export interface HealingFood {
+  name: string;
+  properties: string[];
+  active_compound: string;
+  best_for: string[];
+  preparation: string;
+}
+
+export interface MealPlan {
+  day: number;
+  meals: Array<{ meal: string; foods: string[]; notes: string }>;
+  total_calories: number;
+  macros: { protein_g: number; carbs_g: number; fat_g: number; fiber_g: number };
+  healing_focus: string;
+}
+
+export interface NutritionRec {
+  condition: string;
+  foods: HealingFood[];
+  avoid: string[];
+  rationale: string;
+  nexus_insight?: string;
+}
+
+export interface Horoscope {
+  sign: string;
+  date: string;
+  general: string;
+  love: string;
+  career: string;
+  health: string;
+  lucky_number: number;
+  lucky_color: string;
+  nexus_insight?: string;
+}
+
+export interface BirthChart {
+  sun: PlanetPos;
+  moon: PlanetPos;
+  rising: PlanetPos;
+  planets: PlanetPos[];
+  houses: Array<{ house: number; degree: number; sign: string }>;
+  aspects: Array<{ planet1: string; planet2: string; aspect: string; orb: number }>;
+  nexus_interpretation?: string;
+}
+
+export interface PlanetPos {
+  planet: string;
+  sign: string;
+  degree: number;
+  house?: number;
+  retrograde: boolean;
+}
+
+export interface SignProfile {
+  sign: string;
+  element: string;
+  modality: string;
+  body_area: string;
+  healing_focus: string;
+  meditation: string;
+}
+
+export interface DetoxProtocol {
+  id: string;
+  name: string;
+  description: string;
+  duration_days: number;
+  intensity: string;
+  phases: DetoxPhase[];
+  contraindications: string[];
+  supplements: string[];
+}
+
+export interface DetoxPhase {
+  phase: number;
+  days: string;
+  name: string;
+  focus: string;
+  eat: string[];
+  avoid: string[];
+  practices: string[];
+  expected_symptoms: string[];
+}
+
+export interface DayGuidance {
+  protocol: string;
+  day: number;
+  phase: string;
+  focus: string;
+  eat: string[];
+  avoid: string[];
+  practices: string[];
+  expected_symptoms: string[];
+  supplements: string[];
+}
+
+export interface DetoxLogEntry {
+  protocol_id: string;
+  day_number: number;
+  symptoms: string[];
+  energy_level?: number;
+  notes?: string;
+}
+
+export interface NexusResponse {
+  module: string;
+  recommendation: string;
+  action_items: string[];
+  references: string[];
+  confidence?: number;
+}
