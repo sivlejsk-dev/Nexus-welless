@@ -50,6 +50,10 @@ DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "eat", "food", "diet", "meal", "nutrition", "vitamin", "supplement",
         "protein", "carb", "fat", "calorie", "gut", "inflammation", "detox",
         "fast", "fasting", "recipe", "ingredient", "herb", "healing",
+        "microbiome", "probiotic", "prebiotic", "ferment", "leaky gut",
+        "candida", "sibo", "parasite", "wormwood", "berberine", "ashwagandha",
+        "adaptogen", "magnesium", "omega-3", "glutamine", "collagen",
+        "blood sugar", "insulin", "thyroid", "adrenal", "methylation",
     ],
     "meditation": [
         "meditat", "breathwork", "breathing", "breath", "mindful", "stress",
@@ -60,6 +64,10 @@ DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "detox": [
         "detox", "cleanse", "liver", "toxin", "heavy metal", "parasite",
         "lymph", "flush", "protocol", "fast", "purif",
+        "herxheimer", "die-off", "binder", "chelat", "mold", "mycotoxin",
+        "candida cleanse", "parasite cleanse", "gut reset", "5r protocol",
+        "wormwood", "black walnut", "clove", "mimosa pudica",
+        "activated charcoal", "bentonite clay", "chlorella", "spirulina",
     ],
     "astrology": [
         "astrology", "horoscope", "birth chart", "zodiac", "planet", "transit",

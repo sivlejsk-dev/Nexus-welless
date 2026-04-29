@@ -36,11 +36,27 @@ except Exception as exc:
 
 # Complexity threshold — only invoke full reasoning for non-trivial questions
 COMPLEX_TRIGGERS = [
-    "should i", "which is better", "compare", "strategy", "plan",
+    # General reasoning
+    "which is better", "compare", "strategy", "plan for",
     "how do i", "what is the best", "analyze", "evaluate", "recommend",
-    "risk", "trade-off", "pros and cons", "explain why", "iron condor",
-    "options strategy", "detox protocol", "meal plan", "birth chart",
-    "what would happen", "if i", "calculate",
+    "trade-off", "pros and cons", "explain why",
+    "what would happen", "calculate",
+    "should i take", "should i do", "should i start", "should i use",
+    "should i try", "should i avoid", "should i combine",
+    # Finance
+    "iron condor", "options strategy", "covered call", "bull spread", "bear spread",
+    # Nutrition & detox — new
+    "parasite cleanse", "parasite protocol", "candida", "sibo",
+    "leaky gut", "microbiome", "gut protocol", "gut healing",
+    "food sensitivity", "detox reaction", "herxheimer", "die-off",
+    "heavy metal", "mold toxicity", "mycotoxin", "adrenal fatigue",
+    "thyroid protocol", "methylation", "mthfr", "hormone balance", "hormonal",
+    "blood sugar protocol", "insulin resistance", "autoimmune", "root cause",
+    "supplement stack", "detox protocol", "meal plan",
+    "what's wrong with me", "why do i", "what causes",
+    "vitality reset", "wellness reset", "30-day", "21-day", "60-day",
+    # Astrology
+    "birth chart", "saturn return", "transit", "synastry",
 ]
 
 
@@ -95,6 +111,26 @@ class ReasoningService:
         except Exception as exc:
             log.debug("analyze_problem error: %s", exc)
             return {"problem": problem, "available": False}
+
+    def build_nutrition_reasoning_context(self, query: str, user_profile: dict[str, Any]) -> str:
+        """Inject user profile into reasoning context for nutrition/detox queries."""
+        if not is_complex_query(query):
+            return ""
+        parts = []
+        conditions = user_profile.get("conditions", [])
+        medications = user_profile.get("medications", [])
+        dietary = user_profile.get("dietary_preferences", [])
+        if conditions:
+            parts.append(f"User conditions: {', '.join(conditions)}")
+        if medications:
+            parts.append(f"User medications: {', '.join(medications)} — CHECK ALL HERB-DRUG INTERACTIONS before recommending")
+        if dietary:
+            parts.append(f"Dietary preferences: {', '.join(dietary)}")
+        if parts:
+            parts.insert(0, "[Nutrition reasoning context]")
+            parts.append("Apply root-cause analysis. Sequence: Remove → Replace → Reinoculate → Repair → Rebalance.")
+            parts.append("Always check contraindications before recommending herbs or supplements.")
+        return "\n".join(parts)
 
     def build_reasoning_context(self, problem: str) -> str:
         """

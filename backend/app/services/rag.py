@@ -42,39 +42,59 @@ class RAGService:
         domain: str | None = None,
         n_conversations: int = 3,
         n_knowledge: int = 3,
+        n_domain: int = 4,
     ) -> str:
         """
         Build a RAG context block for injection into the system prompt.
 
+        Searches three sources:
+          1. User's personal conversation history
+          2. User's personal knowledge facts
+          3. Shared domain knowledge base (seeded at startup)
+
         Returns an empty string when no relevant memories exist.
         """
+        from app.services.knowledge_seeder import DOMAIN_USER_ID
+
+        # Personal memories
         results = vector_memory.search_all(
             user_id=user_id,
             query=query,
             n_results=n_conversations + n_knowledge,
             domain_filter=domain,
         )
-
         conv_hits = [
             r for r in results["conversations"] if r["similarity"] >= _MIN_SIMILARITY
         ][:n_conversations]
-
         know_hits = [
             r for r in results["knowledge"] if r["similarity"] >= _MIN_SIMILARITY
         ][:n_knowledge]
 
-        if not conv_hits and not know_hits:
+        # Shared domain knowledge
+        domain_hits = vector_memory.search_knowledge(
+            user_id=DOMAIN_USER_ID,
+            query=query,
+            n_results=n_domain,
+        )
+        domain_hits = [r for r in domain_hits if r["similarity"] >= _MIN_SIMILARITY][:n_domain]
+
+        if not conv_hits and not know_hits and not domain_hits:
             return ""
 
-        parts: list[str] = ["[Relevant memory from past sessions]"]
+        parts: list[str] = []
+
+        if domain_hits:
+            parts.append("[Domain knowledge]")
+            for hit in domain_hits:
+                parts.append(f"  • {hit['document'][:300]}")
 
         if know_hits:
-            parts.append("Facts about this user:")
+            parts.append("[Facts about this user]")
             for hit in know_hits:
                 parts.append(f"  • {hit['document']}")
 
         if conv_hits:
-            parts.append("Related past exchanges:")
+            parts.append("[Related past exchanges]")
             for hit in conv_hits:
                 meta = hit["metadata"]
                 ts = meta.get("timestamp", "")[:10]
@@ -87,8 +107,6 @@ class RAGService:
                     parts.append(f"  [{ts}] {hit['document'][:300]}")
 
         context = "\n".join(parts)
-
-        # Hard cap to avoid blowing the context window
         if len(context) > _MAX_CONTEXT_CHARS:
             context = context[:_MAX_CONTEXT_CHARS] + "\n  [... truncated]"
 
@@ -138,6 +156,24 @@ class RAGService:
             ids.append(kid)
         return ids
 
+    def extract_protocol_facts(
+        self,
+        user_id: str,
+        ai_response: str,
+        domain: str = "general",
+    ) -> list[str]:
+        """Extract and store protocol recommendations from AI responses."""
+        import re
+        ids = []
+        # Detect phase/step descriptions
+        phase_pattern = r"(phase \d|step \d|day \d+[-–]\d+)[:\s].{20,200}"
+        for match in re.finditer(phase_pattern, ai_response, re.IGNORECASE):
+            fact = f"[PROTOCOL STEP] {match.group(0).strip()}"
+            kid = vector_memory.store_knowledge(user_id=user_id, fact=fact,
+                                                domain=domain, source="protocol")
+            ids.append(kid)
+        return ids
+
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_memory_stats(self, user_id: str) -> dict[str, Any]:
@@ -152,16 +188,44 @@ class RAGService:
 # Patterns that signal a user is sharing personal facts
 _USER_FACT_PATTERNS = [
     r"i (am|have|eat|take|do|practice|follow|prefer|avoid|suffer|feel|want|need)\b.{5,80}",
-    r"my (goal|diet|condition|allergy|medication|routine|sign|chart|birthday|age)\b.{3,80}",
-    r"i'?m (a |an |trying|working|looking|struggling|interested).{5,80}",
+    r"my (goal|diet|condition|allergy|medication|routine|sign|chart|birthday|age|supplement|symptom)\b.{3,80}",
+    r"i'?m (a |an |trying|working|looking|struggling|interested|sensitive|allergic|diagnosed).{5,80}",
+    r"i (take|use|supplement with|have been on|started|stopped)\b.{5,80}",
+    r"i (experience|struggle with|suffer from|have been diagnosed with|tested positive for)\b.{5,80}",
+    r"i follow (a |the |an ).{5,60}(diet|protocol|program|plan)",
+    r"i'?m (vegan|vegetarian|carnivore|keto|paleo|gluten.free|dairy.free|plant.based)",
 ]
 
-# Patterns that signal the AI is stating a domain fact
+# Patterns that signal the AI is stating a domain fact — expanded for nutrition/detox/herbs
 _AI_FACT_PATTERNS = [
-    r"(turmeric|magnesium|omega-3|vitamin [a-z]|ashwagandha|melatonin).{10,120}",
-    r"(mercury retrograde|saturn return|jupiter transit|lunar cycle).{10,120}",
-    r"(options|call|put|strike|expiry|implied volatility|theta|delta).{10,120}",
-    r"(intermittent fasting|ketogenic|circadian|cortisol|insulin).{10,120}",
+    # Anti-inflammatory & antioxidant
+    r"(turmeric|curcumin|ginger|blueberr|resveratrol|quercetin|polyphenol).{10,120}",
+    r"(omega-3|EPA|DHA|fish oil|flaxseed|chia seed).{10,120}",
+    r"(magnesium|zinc|selenium|iodine|vitamin [a-z][0-9]?|B12|folate|methylfolate).{10,120}",
+    # Antiparasitic herbs
+    r"(wormwood|black walnut|clove|mimosa pudica|artemisia|artemisinin).{10,120}",
+    r"(oregano oil|carvacrol|berberine|neem|pau d'arco|cat's claw|andrographis).{10,120}",
+    r"(grapefruit seed extract|olive leaf|uva ursi|barberry|goldenseal).{10,120}",
+    # Detox agents
+    r"(chlorella|spirulina|cilantro|activated charcoal|bentonite clay|zeolite).{10,120}",
+    r"(milk thistle|silymarin|dandelion|artichoke|burdock|NAC|glutathione|liposomal).{10,120}",
+    r"(heavy metal|mercury|lead|cadmium|chelat|DMSA|EDTA|modified citrus pectin).{10,120}",
+    # Gut & microbiome
+    r"(SIBO|candida|leaky gut|dysbiosis|biofilm|Herxheimer|die.off|intestinal permeability).{10,120}",
+    r"(L-glutamine|zinc carnosine|slippery elm|marshmallow root|aloe vera|colostrum).{10,120}",
+    r"(probiotic|prebiotic|Lactobacillus|Bifidobacterium|Saccharomyces|butyrate|SCFA).{10,120}",
+    r"(bone broth|collagen|gelatin|glycine|resistant starch|fermented food).{10,120}",
+    # Adaptogens & vitality
+    r"(ashwagandha|withanolide|rhodiola|lion's mane|reishi|cordyceps|maca|moringa).{10,120}",
+    r"(adaptogen|HPA axis|adrenal|cortisol|DHEA|thyroid|T3|T4|TSH).{10,120}",
+    # Functional medicine concepts
+    r"(methylation|MTHFR|homocysteine|Phase I|Phase II|liver detox|cytochrome P450).{10,120}",
+    r"(intermittent fasting|ketogenic|circadian|insulin resistance|blood sugar|HbA1c).{10,120}",
+    r"(autoimmune|inflammation|hs-CRP|IL-6|NF-kB|oxidative stress|mitochondria).{10,120}",
+    # Astrology (preserve existing)
+    r"(mercury retrograde|saturn return|jupiter transit|lunar cycle|full moon).{10,120}",
+    # Finance (preserve existing)
+    r"(options|call|put|strike|expiry|implied volatility|theta|delta|gamma|vega).{10,120}",
 ]
 
 

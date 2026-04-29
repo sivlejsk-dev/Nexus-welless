@@ -31,6 +31,7 @@ openai==1.57.4          # Nexus-compatible OpenAI-spec client
 numpy==1.26.4
 scikit-learn==1.5.2
 chromadb==0.5.23        # Vector store for RAG memory layer
+aiosqlite==0.20.0       # Async SQLite driver for dev/test
 
 # Astrology / Ephemeris
 pyswisseph==2.10.3.2    # Swiss Ephemeris bindings

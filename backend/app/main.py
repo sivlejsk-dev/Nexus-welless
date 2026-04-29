@@ -18,8 +18,19 @@ async def lifespan(app: FastAPI):
     # Auto-create tables on startup (dev convenience; use Alembic in production)
     from app.db.base import engine, Base
     from app.models.user import User, WellnessProfile, MeditationSession, DetoxLog  # noqa: F401
+    from app.models.session import ChatSession, ChatTurn  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Seed ChromaDB domain knowledge (idempotent)
+    try:
+        from app.services.knowledge_seeder import knowledge_seeder
+        counts = knowledge_seeder.seed_all()
+        if not counts.get("skipped"):
+            log.info("nexus_wellness.knowledge_seeded", counts=counts)
+    except Exception as exc:
+        log.warning("nexus_wellness.knowledge_seed_failed", error=str(exc))
+
     log.info("nexus_wellness.startup", environment=settings.environment)
     yield
     log.info("nexus_wellness.shutdown")

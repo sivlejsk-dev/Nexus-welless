@@ -171,6 +171,118 @@ async def analyze_problem(
     return reasoning_service.analyze(problem)
 
 
+# ── Nutrition knowledge endpoints (Stage 10) ──────────────────────────────────
+
+@router.get("/nutrition/foods/{condition}")
+async def get_foods_for_condition(
+    condition: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return healing foods and herbs for a specific health condition.
+
+    Supports synonym resolution (e.g. 'ibs' → gut-health, 'arthritis' → joint-pain).
+    Results are ranked by evidence tier (RCT > meta-analysis > observational > traditional).
+    """
+    from app.services.nutrition import nutrition_service
+    results = nutrition_service.get_healing_foods(condition)
+    return {
+        "condition": condition,
+        "count": len(results),
+        "foods": results,
+    }
+
+
+@router.get("/nutrition/herb/{name}")
+async def get_herb_monograph(
+    name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the full monograph for a food or herb.
+
+    Includes active compounds, dosing, bioavailability notes,
+    drug interactions, contraindications, and evidence tier.
+    """
+    from app.services.nutrition import nutrition_service
+    mono = nutrition_service.get_food_monograph(name)
+    if not mono:
+        raise HTTPException(status_code=404, detail=f"No monograph found for '{name}'")
+    return mono
+
+
+@router.get("/nutrition/assess")
+async def assess_symptoms(
+    symptoms: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Assess a comma-separated list of symptoms and return likely root causes,
+    possible nutrient deficiencies, and recommended labs.
+
+    Example: ?symptoms=fatigue,brain+fog,bloating,sugar+cravings
+    """
+    from app.nexus_core.nutrition_expertise import nutrition_expertise
+    symptom_list = [s.strip() for s in symptoms.split(",") if s.strip()]
+    if not symptom_list:
+        raise HTTPException(status_code=400, detail="Provide at least one symptom")
+    return nutrition_expertise.assess_symptoms(symptom_list)
+
+
+@router.get("/detox/protocols")
+async def list_detox_protocols(
+    current_user: User = Depends(get_current_user),
+):
+    """List all available detox protocols with metadata (no phase detail)."""
+    from app.services.detox import detox_service
+    protocols = detox_service.get_all_protocols()
+    return {
+        "count": len(protocols),
+        "protocols": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "description": p["description"],
+                "duration_days": p["duration_days"],
+                "intensity": p["intensity"],
+                "phases": len(p["phases"]),
+                "contraindications": p["contraindications"],
+            }
+            for p in protocols
+        ],
+    }
+
+
+@router.get("/detox/protocols/{protocol_id}")
+async def get_detox_protocol(
+    protocol_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Return full detail for a specific detox protocol including all phases."""
+    from app.services.detox import detox_service
+    protocol = detox_service.get_protocol(protocol_id)
+    if not protocol:
+        raise HTTPException(status_code=404, detail=f"Protocol '{protocol_id}' not found")
+    return protocol
+
+
+@router.get("/detox/protocols/{protocol_id}/day/{day}")
+async def get_protocol_day_guidance(
+    protocol_id: str,
+    day: int,
+    current_user: User = Depends(get_current_user),
+):
+    """Return specific day guidance for a detox protocol."""
+    from app.services.detox import detox_service
+    guidance = detox_service.get_day_guidance(protocol_id, day)
+    if not guidance:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No guidance for protocol '{protocol_id}' day {day}"
+        )
+    return guidance
+
+
 # ── Vector memory / RAG endpoints (Task 1.4) ──────────────────────────────────
 
 @router.get("/memory/stats")

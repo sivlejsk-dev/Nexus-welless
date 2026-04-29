@@ -18,15 +18,29 @@ from app.core.config import settings
 
 
 SYSTEM_PROMPT = """You are Nexus, an advanced AI intelligence engine specializing in:
-- Wellness: nutrition science, meditation, detox protocols, functional medicine
+- Functional medicine nutrition: food-as-medicine, therapeutic herbs, detox protocols, microbiome health
 - Astrology: birth charts, transits, cosmic wellness guidance
 - Finance: options trading, technical analysis, investment strategy, risk management
 
-You provide deeply personalized, expert-level guidance. Your responses are:
-- Grounded in evidence and real data
-- Tailored to the user's unique profile, goals, and conversation history
-- Warm but precise — never vague, never generic
-- Actionable with specific next steps
+FUNCTIONAL MEDICINE PRINCIPLES you embody:
+- Food is medicine. Every recommendation includes the mechanism of action, not just the food.
+- Bioindividuality: genetic SNPs (MTHFR, COMT, VDR), microbiome uniqueness, and blood type mean one-size-fits-all advice is insufficient. Always personalize.
+- Root cause over symptom suppression. Ask: why is this happening, not just what relieves it.
+- Detox physiology: Phase I liver detox (cytochrome P450 oxidation) requires B vitamins, antioxidants, and cruciferous vegetables. Phase II (conjugation: glucuronidation, sulfation, methylation, glutathione) requires sulfur amino acids, glycine, and glutathione precursors. Both phases must be supported simultaneously.
+- Gut-brain-immune axis: 70% of the immune system lives in the gut. Gut dysbiosis drives systemic inflammation, mood disorders, autoimmunity, and cognitive decline.
+- Herxheimer awareness: die-off reactions (fatigue, headache, skin breakouts, brain fog) are expected when killing pathogens. Manage with binders (activated charcoal, bentonite clay), hydration, and rest. Never mistake Herxheimer for protocol failure.
+- Sequence matters in detox: open drainage pathways (bowels, kidneys, lymph) BEFORE mobilizing toxins. Never chelate without binders in place.
+- Evidence hierarchy: RCT > meta-analysis > observational > traditional use. Always cite evidence tier.
+- Safety first: flag contraindications, drug-herb interactions, and when to refer to a practitioner. Never recommend therapeutic doses without noting contraindications.
+- Antiparasitic trinity: wormwood + black walnut hull + clove work synergistically. Wormwood kills adults, black walnut kills larvae, clove kills eggs. All three are required.
+- Moon-phase timing: parasites are more active and reproduce around the full moon. Intensify antiparasitic protocols 3 days before and after the full moon.
+
+Your responses are:
+- Mechanistic: explain WHY a food or herb works, not just THAT it works
+- Dosed: always include therapeutic dose ranges, not just food names
+- Sequenced: explain the order of interventions (remove → replace → reinoculate → repair)
+- Contraindication-aware: flag drug interactions and who should avoid each recommendation
+- Actionable: specific next steps, not vague suggestions
 
 You remember context across the conversation and build on previous exchanges."""
 
@@ -111,6 +125,7 @@ class NexusService:
         from app.services.reasoning import reasoning_service
         from app.services.rag import rag_service
         from app.services.session_store import session_store
+        from app.nexus_core.nutrition_expertise import nutrition_expertise
 
         # 1. Conversation processing — resolve references, detect domain/intent/tone
         processed = conversation_engine.process_input(user_id, raw_message)
@@ -143,20 +158,40 @@ class NexusService:
             except Exception:
                 pass  # DB errors must not break chat
 
-        # 5. Inject learning context — what this user knows and prefers
+        # 5. NutritionExpertise — inject domain knowledge for nutrition/detox/parasite queries
+        _nutrition_domains = {"nutrition", "detox", "parasite", "microbiome", "gut-health"}
+        if processed.domain in _nutrition_domains or any(
+            kw in processed.resolved_message.lower()
+            for kw in ("parasite", "candida", "sibo", "leaky gut", "detox", "herb",
+                       "supplement", "gut", "microbiome", "cleanse", "protocol")
+        ):
+            nutrition_ctx = nutrition_expertise.get_domain_context(
+                processed.resolved_message, user_profile or {}
+            )
+            if nutrition_ctx:
+                base_system += f"\n\n[Nutrition expertise]\n{nutrition_ctx}"
+
+            # Nutrition-specific reasoning context (includes user conditions + medications)
+            nutrition_reasoning = reasoning_service.build_nutrition_reasoning_context(
+                processed.resolved_message, user_profile or {}
+            )
+            if nutrition_reasoning:
+                base_system += f"\n\n{nutrition_reasoning}"
+
+        # 6. Inject learning context — what this user knows and prefers
         learning_ctx = learning_service.build_learning_context(user_id, processed.domain)
         if learning_ctx:
             base_system += f"\n\nLearning context: {learning_ctx}"
 
-        # 6. Inject reasoning context for complex multi-step queries
+        # 7. Inject reasoning context for complex multi-step queries
         reasoning_ctx = reasoning_service.build_reasoning_context(processed.resolved_message)
         if reasoning_ctx:
             base_system += f"\n\nReasoning guidance: {reasoning_ctx}"
 
-        # 7. Build full context-aware system prompt
+        # 8. Build full context-aware system prompt
         system_prompt = processed.build_system_prompt(base_system)
 
-        # 8. LLM call with full conversation history
+        # 9. LLM call with full conversation history
         raw_response = await self.complete(
             user_message=processed.resolved_message,
             system_context=system_prompt,
@@ -218,7 +253,7 @@ class NexusService:
             "suggestions": processed.suggestions,
             "context": processed.to_dict(),
             "session_id": db_session_id,
-            "engine": "nexus-conversation-v1.4",
+            "engine": "nexus-conversation-v1.5",
         }
 
     async def personalized_recommendation(
