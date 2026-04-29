@@ -1,4 +1,13 @@
-"""Nexus AI service — wraps the Nexus model via OpenAI-compatible API spec."""
+"""
+Nexus AI service — wraps the Nexus model via OpenAI-compatible API spec.
+
+All messages are routed through the ConversationEngine (Task 1.1) which:
+  - Resolves pronouns and references across turns
+  - Tracks topic threads and domain context
+  - Analyzes tone and adjusts response style
+  - Maintains per-user conversation history
+  - Generates proactive suggestions
+"""
 
 from typing import Any
 
@@ -8,15 +17,28 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import settings
 
 
-SYSTEM_PROMPT = """You are Nexus, an advanced wellness intelligence engine. You provide deeply 
-personalized guidance across nutrition science, meditation, detox protocols, and astrology. 
-Your recommendations are grounded in evidence-based wellness practices, integrative medicine, 
-and holistic health principles. Always tailor advice to the user's unique profile, health goals, 
-and astrological blueprint. Be warm, precise, and actionable."""
+SYSTEM_PROMPT = """You are Nexus, an advanced AI intelligence engine specializing in:
+- Wellness: nutrition science, meditation, detox protocols, functional medicine
+- Astrology: birth charts, transits, cosmic wellness guidance
+- Finance: options trading, technical analysis, investment strategy, risk management
+
+You provide deeply personalized, expert-level guidance. Your responses are:
+- Grounded in evidence and real data
+- Tailored to the user's unique profile, goals, and conversation history
+- Warm but precise — never vague, never generic
+- Actionable with specific next steps
+
+You remember context across the conversation and build on previous exchanges."""
 
 
 class NexusService:
-    """Client for the Nexus AI model."""
+    """
+    Client for the Nexus AI model.
+
+    Every chat message is routed through the ConversationEngine which
+    enriches it with resolved context, history, tone, and domain before
+    sending to the LLM.
+    """
 
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(
@@ -39,8 +61,7 @@ class NexusService:
     ) -> str:
         """Send a completion request to Nexus and return the response text.
 
-        Returns a local placeholder when NEXUS_API_KEY is not configured,
-        so all endpoints remain functional without an external API key.
+        Returns a structured local response when NEXUS_API_KEY is not configured.
         """
         if not settings.nexus_api_key:
             return _local_fallback(user_message, system_context)
@@ -64,6 +85,60 @@ class NexusService:
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
+    async def chat(
+        self,
+        user_id: str,
+        raw_message: str,
+        user_profile: dict[str, Any] | None = None,
+        temperature: float = 0.7,
+    ) -> dict[str, Any]:
+        """
+        Full conversation-aware chat with Nexus.
+
+        Routes the message through the ConversationEngine to:
+        1. Resolve pronouns and references
+        2. Detect domain, intent, and tone
+        3. Inject conversation history into the LLM call
+        4. Polish the response to match user's style
+        5. Record the exchange for future context
+        """
+        from app.services.conversation import conversation_engine
+
+        # Process through conversation engine
+        processed = conversation_engine.process_input(user_id, raw_message)
+
+        # Build context-aware system prompt
+        profile_note = _format_profile(user_profile or {})
+        base_system = SYSTEM_PROMPT
+        if profile_note:
+            base_system += f"\n\nUser profile: {profile_note}"
+        system_prompt = processed.build_system_prompt(base_system)
+
+        # Call LLM with full conversation history
+        raw_response = await self.complete(
+            user_message=processed.resolved_message,
+            system_context=system_prompt,
+            history=processed.history[:-1],  # exclude the turn we just added
+            temperature=temperature,
+        )
+
+        # Polish response to match user's tone
+        polished = conversation_engine.polish_response(user_id, raw_response, raw_message)
+
+        # Record AI response in session
+        conversation_engine.record_response(user_id, polished)
+
+        return {
+            "response": polished,
+            "domain": processed.domain,
+            "intent": processed.intent,
+            "discourse_type": processed.discourse_type,
+            "needs_clarification": processed.needs_clarification,
+            "suggestions": processed.suggestions,
+            "context": processed.to_dict(),
+            "engine": "nexus-conversation-v1",
+        }
+
     async def personalized_recommendation(
         self,
         module: str,
@@ -74,9 +149,7 @@ class NexusService:
         """Generate a structured wellness recommendation for a given module."""
         profile_summary = _format_profile(user_profile)
         prompt = _build_module_prompt(module, profile_summary, context, user_message)
-
         raw = await self.complete(prompt, temperature=0.6)
-
         return {
             "module": module,
             "recommendation": raw,
