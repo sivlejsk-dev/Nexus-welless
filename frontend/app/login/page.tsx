@@ -26,9 +26,11 @@ export default function LoginPage() {
       } else {
         await register(email, password, name);
       }
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Login error:", msg);
+      setError(msg || "Login failed — check console for details");
     } finally {
       setLoading(false);
     }
@@ -102,9 +104,9 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <p className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
-                {error}
-              </p>
+              <div className="text-rose-400 text-xs bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2 break-all">
+                <strong>Error:</strong> {error}
+              </div>
             )}
 
             <Button type="submit" className="w-full" size="lg" disabled={loading}>

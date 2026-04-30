@@ -129,6 +129,19 @@ export const nexus = {
     }),
 };
 
+// ── Meat Substitutes ──────────────────────────────────────────────────────────
+
+export const meatSubs = {
+  bases: () => request<MeatSubBase[]>("/meat-substitutes/bases"),
+  base: (id: string) => request<MeatSubBase>(`/meat-substitutes/bases/${id}`),
+  recipes: (craving?: string) =>
+    request<MeatSubRecipe[]>(`/meat-substitutes/recipes${craving ? `?craving=${encodeURIComponent(craving)}` : ""}`),
+  recipe: (id: string) => request<MeatSubRecipe>(`/meat-substitutes/recipes/${id}`),
+  forMeat: (meatType: string) => request<MeatSubForMeat>(`/meat-substitutes/for/${encodeURIComponent(meatType)}`),
+  techniques: () => request<MeatSubTechnique[]>("/meat-substitutes/techniques"),
+  nutritionComparison: () => request<Record<string, unknown>>("/meat-substitutes/nutrition-comparison"),
+};
+
 // ── Voice ─────────────────────────────────────────────────────────────────────
 
 /** Upload audio blob and get back transcript + Nexus response + optional MP3. */
@@ -377,4 +390,46 @@ export interface VoiceConfig {
   default_voice: string;
   supported_formats: string[];
   max_audio_mb: number;
+}
+
+export interface MeatSubBase {
+  id: string;
+  name: string;
+  protein_per_100g: number;
+  texture: string;
+  best_for: string[];
+  prep: string;
+  flavor_profile: string;
+  nutrition_notes: string;
+  craving_it_satisfies: string;
+}
+
+export interface MeatSubRecipe {
+  id: string;
+  name: string;
+  satisfies_craving: string;
+  base_ingredient: string;
+  prep_time_min: number;
+  cook_time_min: number;
+  servings: number;
+  difficulty: string;
+  ingredients: string[];
+  instructions: string[];
+  pro_tips: string[];
+  nutrition_per_serving: { calories: number; protein_g: number; fiber_g: number; fat_g: number };
+  upgrade: string;
+}
+
+export interface MeatSubTechnique {
+  technique: string;
+  purpose: string;
+  applies_to: string[];
+  how: string;
+  why_it_works: string;
+}
+
+export interface MeatSubForMeat {
+  meat_type: string;
+  substitutes: MeatSubBase[];
+  recipes: MeatSubRecipe[];
 }

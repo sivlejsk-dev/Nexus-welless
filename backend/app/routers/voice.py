@@ -33,8 +33,8 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024
 async def get_voice_config(current_user: User = Depends(get_current_user)):
     """Return voice capability flags and available voices."""
     return {
-        "stt_available": voice_service._configured,
-        "tts_available": voice_service._configured,
+        "stt_available": voice_service._stt_configured,
+        "tts_available": voice_service._tts_configured,
         "available_voices": AVAILABLE_VOICES,
         "default_voice": DEFAULT_VOICE,
         "supported_formats": ["webm", "mp4", "m4a", "wav", "mp3", "ogg", "flac"],

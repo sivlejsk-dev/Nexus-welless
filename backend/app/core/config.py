@@ -17,7 +17,10 @@ class Settings(BaseSettings):
 
     # ── App ──────────────────────────────────────────────────
     environment: Literal["development", "staging", "production"] = "development"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "https://3000--019dd676-8a08-774e-a49c-fe815807db48.us-east-1-01.gitpod.dev",
+    ]
 
     # ── Database ─────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://nexus:nexus_secret@localhost:5432/nexus_wellness"
@@ -31,10 +34,15 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
 
-    # ── Nexus AI ─────────────────────────────────────────────
+    # ── Nexus AI (OpenAI — voice + complex reasoning) ────────
     nexus_api_key: str = ""
-    nexus_api_base_url: str = "https://api.nexus-ai.example.com/v1"
-    nexus_model: str = "nexus-core-v1"
+    nexus_api_base_url: str = "https://api.openai.com/v1"
+    nexus_model: str = "gpt-4o"
+
+    # ── Groq (fast chat) ─────────────────────────────────────
+    groq_api_key: str = ""
+    groq_api_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "llama-3.3-70b-versatile"
 
     # ── External APIs ────────────────────────────────────────
     usda_api_key: str = ""

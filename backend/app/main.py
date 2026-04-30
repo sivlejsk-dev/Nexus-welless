@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
-from app.routers import astrology, auth, detox, meditation, nexus, nutrition, users, voice
+from app.routers import astrology, auth, detox, meat_substitutes, meditation, nexus, nutrition, users, voice
 
 log = structlog.get_logger()
 
@@ -50,6 +50,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=r"https://.*\.gitpod\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,6 +69,7 @@ app.include_router(astrology.router, prefix=API_PREFIX)
 app.include_router(detox.router, prefix=API_PREFIX)
 app.include_router(nexus.router, prefix=API_PREFIX)
 app.include_router(voice.router, prefix=API_PREFIX)
+app.include_router(meat_substitutes.router, prefix=API_PREFIX)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────

@@ -680,29 +680,79 @@ class NutritionService:
         return entry.get("bioavailability_notes", "")
 
     def get_meal_plan(self, focus: str = "anti-inflammatory", days: int = 7) -> list[dict[str, Any]]:
-        """Generate a structured meal plan based on healing focus."""
-        focus_foods = self.get_healing_foods(focus)[:6]
-        base_meals = [
-            {"meal": "Breakfast", "foods": ["golden milk oatmeal", "blueberries", "walnuts"],
-             "notes": "Anti-inflammatory base. Add 1 tsp turmeric + pinch black pepper."},
-            {"meal": "Lunch", "foods": ["wild salmon", "leafy greens", "olive oil dressing"],
-             "notes": "Omega-3s + chlorophyll for liver and inflammation support."},
-            {"meal": "Dinner", "foods": ["lentil soup", "roasted beets", "ginger tea"],
-             "notes": "Plant protein + fiber + liver support."},
-            {"meal": "Snacks", "foods": ["celery + almond butter", "green smoothie with spirulina"],
-             "notes": "Avoid processed sugar. Add chlorella for detox support."},
-        ]
-        return [
-            {
+        """Generate a varied daily meal plan based on healing focus."""
+        focus_foods = self.get_healing_foods(focus)[:8]
+
+        MEAL_ROTATIONS: dict[str, list[dict]] = {
+            "anti-inflammatory": [
+                {"meal": "Breakfast", "foods": ["golden milk oatmeal", "blueberries", "walnuts", "chia seeds"], "notes": "1 tsp turmeric + pinch black pepper activates curcumin absorption 20x."},
+                {"meal": "Breakfast", "foods": ["green smoothie", "spinach", "banana", "ginger", "flaxseed"], "notes": "Ginger inhibits COX-2 enzymes — same mechanism as ibuprofen, without side effects."},
+                {"meal": "Breakfast", "foods": ["avocado toast", "sprouted grain bread", "hemp seeds", "lemon"], "notes": "Sprouted grains reduce phytic acid, improving mineral absorption by 50%."},
+                {"meal": "Breakfast", "foods": ["overnight oats", "tart cherries", "cinnamon", "almonds"], "notes": "Tart cherries contain anthocyanins that reduce CRP (C-reactive protein)."},
+                {"meal": "Breakfast", "foods": ["turmeric scrambled eggs", "sautéed kale", "olive oil"], "notes": "Eggs provide choline for liver methylation; kale provides sulforaphane."},
+                {"meal": "Breakfast", "foods": ["papaya bowl", "pineapple", "mint", "lime"], "notes": "Bromelain in pineapple and papain in papaya are systemic anti-inflammatory enzymes."},
+                {"meal": "Breakfast", "foods": ["miso soup", "wakame seaweed", "tofu", "green onion"], "notes": "Fermented miso provides beneficial bacteria and isoflavones."},
+            ],
+            "lunch": [
+                {"meal": "Lunch", "foods": ["wild salmon", "arugula salad", "olive oil", "lemon", "capers"], "notes": "EPA/DHA from wild salmon reduce IL-6 and TNF-alpha inflammatory markers."},
+                {"meal": "Lunch", "foods": ["lentil soup", "turmeric", "cumin", "spinach", "bone broth"], "notes": "Lentils provide resistant starch that feeds anti-inflammatory Lactobacillus strains."},
+                {"meal": "Lunch", "foods": ["quinoa bowl", "roasted beets", "goat cheese", "walnuts", "arugula"], "notes": "Beets contain betalains — potent anti-inflammatory pigments that support Phase II liver detox."},
+                {"meal": "Lunch", "foods": ["sardines on rye", "avocado", "cucumber", "dill"], "notes": "Sardines are highest omega-3 per calorie of any fish; rye provides beta-glucan fiber."},
+                {"meal": "Lunch", "foods": ["chicken bone broth soup", "ginger", "garlic", "bok choy", "shiitake"], "notes": "Shiitake mushrooms contain lentinan — a beta-glucan that activates NK cells."},
+                {"meal": "Lunch", "foods": ["black bean tacos", "cabbage slaw", "cilantro", "lime", "avocado"], "notes": "Black beans contain anthocyanins and resistant starch for gut microbiome diversity."},
+                {"meal": "Lunch", "foods": ["tuna niçoise", "green beans", "olives", "hard-boiled eggs", "capers"], "notes": "Olives provide oleocanthal — a natural COX inhibitor with ibuprofen-like activity."},
+            ],
+            "dinner": [
+                {"meal": "Dinner", "foods": ["baked cod", "roasted sweet potato", "steamed broccoli", "ginger"], "notes": "Broccoli sulforaphane activates Nrf2 pathway — master regulator of antioxidant defense."},
+                {"meal": "Dinner", "foods": ["lamb stew", "rosemary", "garlic", "root vegetables", "bone broth"], "notes": "Rosemary contains rosmarinic acid — inhibits complement activation in inflammatory cascade."},
+                {"meal": "Dinner", "foods": ["stir-fried tempeh", "bok choy", "ginger", "tamari", "sesame"], "notes": "Fermented tempeh has higher isoflavone bioavailability than unfermented soy."},
+                {"meal": "Dinner", "foods": ["grass-fed beef", "roasted asparagus", "garlic butter", "lemon"], "notes": "Grass-fed beef has 2-5x more omega-3s and CLA than grain-fed."},
+                {"meal": "Dinner", "foods": ["mung bean dal", "turmeric", "cumin", "coriander", "ghee"], "notes": "Mung beans are the most easily digestible legume — ideal for gut healing phases."},
+                {"meal": "Dinner", "foods": ["baked salmon", "cauliflower rice", "tahini", "parsley"], "notes": "Cauliflower provides DIM (diindolylmethane) for estrogen metabolism support."},
+                {"meal": "Dinner", "foods": ["chicken thighs", "roasted fennel", "olives", "tomatoes", "herbs"], "notes": "Fennel contains anethole — reduces NF-κB activation, a key inflammatory pathway."},
+            ],
+            "snacks": [
+                {"meal": "Snacks", "foods": ["celery + almond butter", "green tea"], "notes": "EGCG in green tea inhibits inflammatory cytokine production."},
+                {"meal": "Snacks", "foods": ["walnuts", "tart cherry juice", "dark chocolate 85%"], "notes": "Walnuts are the only nut with significant ALA omega-3s."},
+                {"meal": "Snacks", "foods": ["apple + tahini", "cinnamon", "herbal tea"], "notes": "Cinnamon improves insulin sensitivity — reduces inflammatory AGE formation."},
+                {"meal": "Snacks", "foods": ["pumpkin seeds", "goji berries", "coconut flakes"], "notes": "Pumpkin seeds are highest plant source of zinc — critical for immune regulation."},
+                {"meal": "Snacks", "foods": ["bone broth", "turmeric", "black pepper", "coconut oil"], "notes": "Bone broth glycine reduces intestinal permeability (leaky gut)."},
+                {"meal": "Snacks", "foods": ["kefir", "berries", "honey"], "notes": "Kefir contains 30+ probiotic strains vs 1-2 in most supplements."},
+                {"meal": "Snacks", "foods": ["guacamole", "flaxseed crackers", "cucumber"], "notes": "Avocado oleic acid reduces CRP by up to 20% in clinical studies."},
+            ],
+        }
+
+        macro_profiles = {
+            "anti-inflammatory": {"protein_g": 85, "carbs_g": 200, "fat_g": 70, "fiber_g": 38},
+            "gut-healing": {"protein_g": 90, "carbs_g": 180, "fat_g": 65, "fiber_g": 42},
+            "detox": {"protein_g": 75, "carbs_g": 160, "fat_g": 55, "fiber_g": 45},
+            "energy": {"protein_g": 100, "carbs_g": 240, "fat_g": 60, "fiber_g": 32},
+            "weight-loss": {"protein_g": 110, "carbs_g": 140, "fat_g": 55, "fiber_g": 40},
+        }
+        macros = macro_profiles.get(focus, macro_profiles["anti-inflammatory"])
+
+        plan = []
+        for d in range(days):
+            idx = d % 7
+            day_meals = [
+                MEAL_ROTATIONS["anti-inflammatory"][idx],
+                MEAL_ROTATIONS["lunch"][idx],
+                MEAL_ROTATIONS["dinner"][idx],
+                MEAL_ROTATIONS["snacks"][idx],
+            ]
+            # Vary calories slightly each day
+            cal_variance = [-100, 0, 50, -50, 100, 0, -75][idx]
+            plan.append({
                 "day": d + 1,
-                "meals": base_meals,
+                "meals": day_meals,
                 "healing_focus": focus,
                 "featured_foods": [f["name"] for f in focus_foods],
-                "total_calories": 1800 + (d % 3) * 50,
-                "macros": {"protein_g": 85, "carbs_g": 220, "fat_g": 65, "fiber_g": 35},
-            }
-            for d in range(days)
-        ]
+                "total_calories": 1850 + cal_variance,
+                "macros": macros,
+                "hydration_goal_ml": 2500,
+                "supplements": _supplements_for_focus(focus),
+            })
+        return plan
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -726,20 +776,40 @@ ANTI_INFLAMMATORY_PROTOCOL: list[dict[str, Any]] = [
 ]
 
 
+def _supplements_for_focus(focus: str) -> list[str]:
+    return {
+        "anti-inflammatory": ["Omega-3 2g/day", "Curcumin 500mg with piperine", "Vitamin D3 5000IU", "Magnesium glycinate 400mg"],
+        "gut-healing": ["L-Glutamine 5g", "Probiotics 50B CFU", "Digestive enzymes", "Zinc carnosine 75mg"],
+        "detox": ["Milk thistle 600mg", "NAC 600mg", "Activated charcoal (away from meals)", "Chlorella 3g"],
+        "energy": ["CoQ10 200mg", "B-complex", "Iron bisglycinate (if deficient)", "Ashwagandha 600mg"],
+        "weight-loss": ["Berberine 500mg 3x/day", "Green tea extract 400mg", "Chromium picolinate 200mcg", "Fiber supplement 10g"],
+    }.get(focus, ["Multivitamin", "Omega-3 2g/day", "Vitamin D3 2000IU"])
+
+
 def _mock_food_search(query: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "fdcId": 1001,
-            "description": f"{query.title()} (mock result)",
-            "brandOwner": None,
-            "foodCategory": "Whole Foods",
-            "foodNutrients": [
-                {"nutrientName": "Energy", "value": 52, "unitName": "kcal"},
-                {"nutrientName": "Protein", "value": 0.7, "unitName": "g"},
-                {"nutrientName": "Fiber", "value": 2.4, "unitName": "g"},
-            ],
-        }
+    """Return curated food data when USDA API key is not configured."""
+    q = query.lower()
+    DATABASE = [
+        {"fdcId": 1001, "description": "Blueberries, raw", "foodCategory": "Fruits", "foodNutrients": [{"nutrientName": "Energy", "value": 57, "unitName": "kcal"}, {"nutrientName": "Fiber", "value": 2.4, "unitName": "g"}, {"nutrientName": "Vitamin C", "value": 9.7, "unitName": "mg"}]},
+        {"fdcId": 1002, "description": "Turmeric, ground", "foodCategory": "Spices", "foodNutrients": [{"nutrientName": "Energy", "value": 354, "unitName": "kcal"}, {"nutrientName": "Fiber", "value": 21.1, "unitName": "g"}, {"nutrientName": "Iron", "value": 41.4, "unitName": "mg"}]},
+        {"fdcId": 1003, "description": "Salmon, wild Atlantic, raw", "foodCategory": "Fish", "foodNutrients": [{"nutrientName": "Energy", "value": 142, "unitName": "kcal"}, {"nutrientName": "Protein", "value": 19.8, "unitName": "g"}, {"nutrientName": "Omega-3", "value": 2.2, "unitName": "g"}]},
+        {"fdcId": 1004, "description": "Spinach, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 23, "unitName": "kcal"}, {"nutrientName": "Iron", "value": 2.7, "unitName": "mg"}, {"nutrientName": "Folate", "value": 194, "unitName": "mcg"}]},
+        {"fdcId": 1005, "description": "Avocado, raw", "foodCategory": "Fruits", "foodNutrients": [{"nutrientName": "Energy", "value": 160, "unitName": "kcal"}, {"nutrientName": "Fat", "value": 14.7, "unitName": "g"}, {"nutrientName": "Fiber", "value": 6.7, "unitName": "g"}]},
+        {"fdcId": 1006, "description": "Ginger root, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 80, "unitName": "kcal"}, {"nutrientName": "Fiber", "value": 2.0, "unitName": "g"}, {"nutrientName": "Potassium", "value": 415, "unitName": "mg"}]},
+        {"fdcId": 1007, "description": "Garlic, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 149, "unitName": "kcal"}, {"nutrientName": "Protein", "value": 6.4, "unitName": "g"}, {"nutrientName": "Vitamin C", "value": 31.2, "unitName": "mg"}]},
+        {"fdcId": 1008, "description": "Kale, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 49, "unitName": "kcal"}, {"nutrientName": "Vitamin K", "value": 817, "unitName": "mcg"}, {"nutrientName": "Vitamin C", "value": 120, "unitName": "mg"}]},
+        {"fdcId": 1009, "description": "Walnuts, raw", "foodCategory": "Nuts", "foodNutrients": [{"nutrientName": "Energy", "value": 654, "unitName": "kcal"}, {"nutrientName": "Omega-3 ALA", "value": 9.1, "unitName": "g"}, {"nutrientName": "Protein", "value": 15.2, "unitName": "g"}]},
+        {"fdcId": 1010, "description": "Lentils, cooked", "foodCategory": "Legumes", "foodNutrients": [{"nutrientName": "Energy", "value": 116, "unitName": "kcal"}, {"nutrientName": "Protein", "value": 9.0, "unitName": "g"}, {"nutrientName": "Fiber", "value": 7.9, "unitName": "g"}]},
+        {"fdcId": 1011, "description": "Beets, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 43, "unitName": "kcal"}, {"nutrientName": "Folate", "value": 109, "unitName": "mcg"}, {"nutrientName": "Fiber", "value": 2.8, "unitName": "g"}]},
+        {"fdcId": 1012, "description": "Broccoli, raw", "foodCategory": "Vegetables", "foodNutrients": [{"nutrientName": "Energy", "value": 34, "unitName": "kcal"}, {"nutrientName": "Vitamin C", "value": 89.2, "unitName": "mg"}, {"nutrientName": "Sulforaphane", "value": 73, "unitName": "mg"}]},
+        {"fdcId": 1013, "description": "Chia seeds", "foodCategory": "Seeds", "foodNutrients": [{"nutrientName": "Energy", "value": 486, "unitName": "kcal"}, {"nutrientName": "Fiber", "value": 34.4, "unitName": "g"}, {"nutrientName": "Omega-3 ALA", "value": 17.8, "unitName": "g"}]},
+        {"fdcId": 1014, "description": "Bone broth, chicken", "foodCategory": "Broths", "foodNutrients": [{"nutrientName": "Energy", "value": 38, "unitName": "kcal"}, {"nutrientName": "Protein", "value": 6.8, "unitName": "g"}, {"nutrientName": "Glycine", "value": 1.2, "unitName": "g"}]},
+        {"fdcId": 1015, "description": "Fermented kimchi", "foodCategory": "Fermented Foods", "foodNutrients": [{"nutrientName": "Energy", "value": 15, "unitName": "kcal"}, {"nutrientName": "Probiotics", "value": 1000, "unitName": "million CFU"}, {"nutrientName": "Vitamin K2", "value": 31, "unitName": "mcg"}]},
     ]
+    results = [f for f in DATABASE if q in f["description"].lower()]
+    if not results:
+        results = DATABASE[:5]
+    return results
 
 
 nutrition_service = NutritionService()

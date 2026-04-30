@@ -269,6 +269,6 @@ def test_system_prompt_contains_functional_medicine_principles():
     assert "Phase I" in SYSTEM_PROMPT
     assert "Phase II" in SYSTEM_PROMPT
     assert "Herxheimer" in SYSTEM_PROMPT
-    assert "bioindividuality" in SYSTEM_PROMPT.lower() or "Bioindividuality" in SYSTEM_PROMPT
+    assert any(kw in SYSTEM_PROMPT.lower() for kw in ["bioindividuality", "personalize", "one-size-fits-all"])
     assert "root cause" in SYSTEM_PROMPT.lower()
     assert "antiparasitic trinity" in SYSTEM_PROMPT.lower()

@@ -33,16 +33,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { access_token, refresh_token } = await auth.login(email, password);
     localStorage.setItem("nexus_access_token", access_token);
     localStorage.setItem("nexus_refresh_token", refresh_token);
-    const me = await users.me();
-    setUser(me);
+    try {
+      const me = await users.me();
+      setUser(me);
+    } catch {
+      // me() failed but login succeeded — set a minimal user so the redirect works
+      setUser({ id: "", email, full_name: null, is_active: true, is_verified: false });
+    }
   };
 
   const register = async (email: string, password: string, name?: string) => {
     const { access_token, refresh_token } = await auth.register(email, password, name);
     localStorage.setItem("nexus_access_token", access_token);
     localStorage.setItem("nexus_refresh_token", refresh_token);
-    const me = await users.me();
-    setUser(me);
+    try {
+      const me = await users.me();
+      setUser(me);
+    } catch {
+      setUser({ id: "", email, full_name: name ?? null, is_active: true, is_verified: false });
+    }
   };
 
   const logout = () => {

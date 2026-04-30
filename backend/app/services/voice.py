@@ -44,9 +44,18 @@ class VoiceService:
     """STT + TTS wrapper around the OpenAI-compatible Nexus API."""
 
     def __init__(self) -> None:
-        self._base_url = settings.nexus_api_base_url.rstrip("/")
-        self._api_key = settings.nexus_api_key
-        self._configured = bool(self._api_key)
+        # STT: prefer Groq Whisper (free), fall back to OpenAI Whisper
+        self._groq_key = settings.groq_api_key
+        self._groq_base = settings.groq_api_base_url.rstrip("/")
+        # TTS: OpenAI only (Groq has no TTS)
+        self._openai_key = settings.nexus_api_key
+        self._openai_base = settings.nexus_api_base_url.rstrip("/")
+        # STT is available if either key is set
+        self._stt_configured = bool(self._groq_key or self._openai_key)
+        # TTS requires OpenAI key
+        self._tts_configured = bool(self._openai_key)
+        # Legacy compat
+        self._configured = self._stt_configured
 
     # ── STT ───────────────────────────────────────────────────────────────────
 
@@ -67,37 +76,45 @@ class VoiceService:
                 "configured": bool,   # False when API key is missing
             }
         """
-        if not self._configured:
-            log.warning("VoiceService: NEXUS_API_KEY not set — STT unavailable")
+        if not self._stt_configured:
+            log.warning("VoiceService: no API key set — STT unavailable")
             return {"transcript": "", "language": None, "duration": None, "configured": False}
 
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                files = {"file": (filename, io.BytesIO(audio_bytes), _mime_for(filename))}
-                data: dict[str, str] = {"model": DEFAULT_STT_MODEL, "response_format": "json"}
-                if language:
-                    data["language"] = language
+        # Try Groq Whisper first (free), fall back to OpenAI Whisper
+        providers = []
+        if self._groq_key:
+            providers.append((self._groq_base, self._groq_key))
+        if self._openai_key:
+            providers.append((self._openai_base, self._openai_key))
 
-                resp = await client.post(
-                    f"{self._base_url}/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    files=files,
-                    data=data,
-                )
-                resp.raise_for_status()
-                body = resp.json()
-                return {
-                    "transcript": body.get("text", "").strip(),
-                    "language": body.get("language"),
-                    "duration": body.get("duration"),
-                    "configured": True,
-                }
-        except httpx.HTTPStatusError as exc:
-            log.error("STT HTTP error %s: %s", exc.response.status_code, exc.response.text[:200])
-            raise
-        except Exception as exc:
-            log.error("STT error: %s", exc)
-            raise
+        last_exc: Exception | None = None
+        for base_url, api_key in providers:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    files = {"file": (filename, io.BytesIO(audio_bytes), _mime_for(filename))}
+                    data: dict[str, str] = {"model": DEFAULT_STT_MODEL, "response_format": "json"}
+                    if language:
+                        data["language"] = language
+                    resp = await client.post(
+                        f"{base_url}/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        files=files,
+                        data=data,
+                    )
+                    resp.raise_for_status()
+                    body = resp.json()
+                    return {
+                        "transcript": body.get("text", "").strip(),
+                        "language": body.get("language"),
+                        "duration": body.get("duration"),
+                        "configured": True,
+                    }
+            except Exception as exc:
+                log.warning("STT provider %s failed: %s", base_url, exc)
+                last_exc = exc
+                continue
+
+        raise last_exc or RuntimeError("All STT providers failed")
 
     # ── TTS ───────────────────────────────────────────────────────────────────
 
@@ -114,8 +131,8 @@ class VoiceService:
         Returns None when the API key is not configured so callers can
         fall back to the browser's Web Speech API.
         """
-        if not self._configured:
-            log.warning("VoiceService: NEXUS_API_KEY not set — TTS unavailable")
+        if not self._tts_configured:
+            log.warning("VoiceService: NEXUS_API_KEY not set — TTS unavailable, use browser TTS")
             return None
 
         # Truncate very long responses to avoid TTS timeouts (4096 char limit)
@@ -124,9 +141,9 @@ class VoiceService:
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
-                    f"{self._base_url}/audio/speech",
+                    f"{self._openai_base}/audio/speech",
                     headers={
-                        "Authorization": f"Bearer {self._api_key}",
+                        "Authorization": f"Bearer {self._openai_key}",
                         "Content-Type": "application/json",
                     },
                     json={

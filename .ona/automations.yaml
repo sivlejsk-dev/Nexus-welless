@@ -1,0 +1,37 @@
+services:
+  backend:
+    name: Backend (FastAPI)
+    description: Nexus FastAPI backend on port 8000
+    commands:
+      start: |
+        cd /workspaces/workspaces/backend
+        source venv/bin/activate 2>/dev/null || true
+        while true; do
+          python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          echo "Backend crashed, restarting in 3s..."
+          sleep 3
+        done
+      ready: curl -sf http://localhost:8000/health
+
+  frontend:
+    name: Frontend (Next.js)
+    description: Nexus Next.js frontend on port 3000
+    commands:
+      start: |
+        cd /workspaces/workspaces/frontend
+        while true; do
+          npm run dev -- --port 3000
+          echo "Frontend crashed, restarting in 3s..."
+          sleep 3
+        done
+      ready: curl -sf http://localhost:3000
+
+tasks:
+  open-ports:
+    name: Open ports
+    description: Expose frontend and backend ports on environment start
+    command: |
+      gitpod environment port open 3000 --name frontend --admission everyone 2>/dev/null || true
+      gitpod environment port open 8000 --name backend --admission everyone 2>/dev/null || true
+    triggeredBy:
+      - postDevcontainerStart
