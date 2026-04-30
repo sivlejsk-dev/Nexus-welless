@@ -129,6 +129,25 @@ export const nexus = {
     }),
 };
 
+// ── Media / Console ───────────────────────────────────────────────────────────
+
+export const mediaApi = {
+  config: () => request<MediaConfig>("/media/config"),
+  guides: () => request<MediaGuideInfo[]>("/media/guides"),
+  guide: (id: string, dalle = false) =>
+    request<MediaGuide>(`/media/guides/${id}?dalle=${dalle}`),
+  generate: (prompt: string, topic = "general", size = "1024x1024") =>
+    request<MediaImage>("/media/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, topic, size }),
+    }),
+  query: (query: string, media_type = "auto") =>
+    request<MediaQueryResult>("/media/query", {
+      method: "POST",
+      body: JSON.stringify({ query, media_type }),
+    }),
+};
+
 // ── Meat Substitutes ──────────────────────────────────────────────────────────
 
 export const meatSubs = {
@@ -390,6 +409,54 @@ export interface VoiceConfig {
   default_voice: string;
   supported_formats: string[];
   max_audio_mb: number;
+}
+
+// ── Media types ───────────────────────────────────────────────────────────────
+
+export interface MediaConfig {
+  dalle_available: boolean;
+  guides_available: boolean;
+  fallback_images: boolean;
+  supported_sizes: string[];
+  guide_count: number;
+}
+
+export interface MediaImage {
+  url: string;
+  source: "dalle-3" | "unsplash";
+  prompt: string | null;
+  revised_prompt: string | null;
+  dalle_available: boolean;
+}
+
+export interface MediaGuideStep {
+  step_number: number;
+  title: string;
+  description: string;
+  action: string;
+  icon: string;
+  image: MediaImage;
+}
+
+export interface MediaGuide {
+  id: string;
+  title: string;
+  subtitle: string;
+  total_steps: number;
+  steps: MediaGuideStep[];
+  images_generated: boolean;
+}
+
+export interface MediaGuideInfo {
+  id: string;
+  title: string;
+  subtitle: string;
+  step_count: number;
+}
+
+export interface MediaQueryResult {
+  type: "image" | "guide" | "guide_list";
+  data: MediaImage | MediaGuide | MediaGuideInfo[];
 }
 
 export interface MeatSubBase {

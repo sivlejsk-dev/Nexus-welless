@@ -4,17 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Brain, Leaf, Star, Droplets, Sparkles, ChefHat,
+  LayoutDashboard, Brain, Leaf, Star, Droplets, Sparkles, ChefHat, Monitor,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",     label: "Dashboard",  icon: LayoutDashboard },
-  { href: "/meditation",    label: "Meditation", icon: Brain           },
-  { href: "/nutrition",     label: "Nutrition",  icon: Leaf            },
-  { href: "/astrology",     label: "Astrology",  icon: Star            },
-  { href: "/detox",         label: "Detox",      icon: Droplets        },
-  { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat      },
-  { href: "/nexus",         label: "Nexus AI",   icon: Sparkles        },
+  { href: "/dashboard",     label: "Dashboard",    icon: LayoutDashboard },
+  { href: "/meditation",    label: "Meditation",   icon: Brain           },
+  { href: "/nutrition",     label: "Nutrition",    icon: Leaf            },
+  { href: "/astrology",     label: "Astrology",    icon: Star            },
+  { href: "/detox",         label: "Detox",        icon: Droplets        },
+  { href: "/plant-kitchen", label: "Plant Kitchen",icon: ChefHat         },
+  { href: "/console",       label: "Console",      icon: Monitor         },
+  { href: "/nexus",         label: "Nexus AI",     icon: Sparkles        },
 ];
 
 export function Sidebar() {

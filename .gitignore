@@ -65,3 +65,4 @@ media/
 *.cert
 nexus_ai_source/
 *.db
+backend/data/
