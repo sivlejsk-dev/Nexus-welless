@@ -29,6 +29,14 @@ export default function DashboardPage() {
   const [guides, setGuides] = useState<MeditationGuide[]>([]);
   const [protocol, setProtocol] = useState<DetoxProtocol | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [greeting, setGreeting] = useState("Good day");
+
+  useEffect(() => {
+    // Compute greeting only on client after hydration to avoid mismatch
+    const h = new Date().getHours();
+    const greetingText = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    setGreeting(greetingText);
+  }, []);
 
   useEffect(() => {
     Promise.allSettled([
@@ -38,13 +46,6 @@ export default function DashboardPage() {
         astrology.horoscope("Aries").then(setHoroscope).catch(() => {})),
     ]).finally(() => setLoaded(true));
   }, []);
-
-  const greeting = () => {
-    const h = new Date().getHours();
-    if (h < 12) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
-  };
 
   const name = user?.full_name?.split(" ")[0] ?? "Seeker";
 
@@ -58,7 +59,7 @@ export default function DashboardPage() {
           <span className="text-white/30 text-xs uppercase tracking-widest font-medium">Live session</span>
         </div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-          <span className="text-white">{greeting()}, </span>
+          <span className="text-white">{greeting}, </span>
           <span className="text-gradient">{name}</span>
         </h1>
         <p className="text-white/35 mt-1.5 text-sm">Your wellness intelligence is ready.</p>
