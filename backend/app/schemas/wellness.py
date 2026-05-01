@@ -42,6 +42,8 @@ class MeditationGuide(BaseModel):
     level: str             # beginner | intermediate | advanced
     tags: list[str] = []
     audio_url: str | None = None
+    background_music: str | None = None
+    voice_guidance: dict[str, Any] | None = None
     thumbnail_url: str | None = None
 
 
