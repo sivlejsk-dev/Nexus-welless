@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { meatSubs, MeatSubBase, MeatSubRecipe, MeatSubTechnique } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,39 +27,61 @@ export default function PlantKitchenPage() {
   const [craving, setCraving] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    loadTab(tab);
-  }, [tab]);
+  // Track which tabs have been loaded to avoid redundant fetches.
+  const loadedRef = useRef<Set<Tab>>(new Set());
 
-  const loadTab = async (t: Tab) => {
+  const loadTab = useCallback(async (t: Tab) => {
+    if (loadedRef.current.has(t)) return;
     setLoading(true);
     try {
-      if (t === "recipes" && recipes.length === 0) {
+      if (t === "recipes") {
         const data = await meatSubs.recipes();
         setRecipes(Array.isArray(data) ? data : []);
-      }
-      if (t === "bases" && bases.length === 0) {
+      } else if (t === "bases") {
         setBases(await meatSubs.bases());
-      }
-      if (t === "techniques" && techniques.length === 0) {
+      } else if (t === "techniques") {
         setTechniques(await meatSubs.techniques());
       }
+      loadedRef.current.add(t);
+    } catch (err) {
+      console.error("loadTab error:", err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const searchCraving = async (q: string) => {
-    if (!q.trim()) return;
+  useEffect(() => {
+    loadTab(tab);
+  }, [tab, loadTab]);
+
+  // Accept query as a parameter — chips must not rely on stale `craving` state.
+  const searchCraving = useCallback(async (q: string) => {
+    const query = q.trim();
+    if (!query) return;
     setLoading(true);
     setTab("recipes");
+    // Invalidate recipes cache so results replace the current list.
+    loadedRef.current.delete("recipes");
     try {
-      const data = await meatSubs.forMeat(q);
-      setRecipes(data.recipes);
+      const data = await meatSubs.forMeat(query);
+      setRecipes(Array.isArray(data.recipes) ? data.recipes : []);
+      setExpanded(null);
+    } catch (err) {
+      console.error("searchCraving error:", err);
+      setRecipes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const handleChipClick = useCallback((m: string) => {
+    setCraving(m);
+    searchCraving(m);
+  }, [searchCraving]);
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpanded((prev) => (prev === id ? null : id));
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 p-4 md:p-0">
@@ -93,8 +115,8 @@ export default function PlantKitchenPage() {
           {MEAT_TYPES.map((m) => (
             <button
               key={m}
-              onClick={() => { setCraving(m); searchCraving(m); }}
-              className="px-3 py-1 rounded-full text-xs font-medium bg-white/5 text-white/50 hover:text-white hover:bg-emerald-600/30 transition-all"
+              onClick={() => handleChipClick(m)}
+              className="px-3 py-1 rounded-full text-xs font-medium bg-white/5 text-white/50 hover:text-white hover:bg-emerald-600/30 transition-all capitalize"
             >
               {m}
             </button>
@@ -131,7 +153,11 @@ export default function PlantKitchenPage() {
             <p className="text-white/30 text-center py-12">No recipes found. Try a different craving.</p>
           ) : (
             recipes.map((r) => (
-              <Card key={r.id} className="cursor-pointer" onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+              <Card
+                key={r.id}
+                className="cursor-pointer"
+                onClick={() => toggleExpanded(r.id)}
+              >
                 <CardHeader>
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
@@ -143,9 +169,12 @@ export default function PlantKitchenPage() {
                       </div>
                       <p className="text-white/40 text-xs mt-1">Satisfies: {r.satisfies_craving}</p>
                     </div>
-                    {expanded === r.id ? <ChevronUp className="w-4 h-4 text-white/30 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-white/30 flex-shrink-0" />}
+                    {expanded === r.id
+                      ? <ChevronUp className="w-4 h-4 text-white/30 flex-shrink-0" />
+                      : <ChevronDown className="w-4 h-4 text-white/30 flex-shrink-0" />
+                    }
                   </div>
-                  <div className="flex gap-3 mt-2 text-white/40 text-xs">
+                  <div className="flex gap-3 mt-2 text-white/40 text-xs flex-wrap">
                     <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{r.prep_time_min + r.cook_time_min} min</span>
                     <span className="flex items-center gap-1"><Users className="w-3 h-3" />{r.servings} servings</span>
                     <span className="flex items-center gap-1"><Leaf className="w-3 h-3" />{r.base_ingredient}</span>
@@ -155,7 +184,6 @@ export default function PlantKitchenPage() {
 
                 {expanded === r.id && (
                   <CardContent className="space-y-4 border-t border-white/5 pt-4">
-                    {/* Ingredients */}
                     <div>
                       <p className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Ingredients</p>
                       <ul className="space-y-1">
@@ -168,7 +196,6 @@ export default function PlantKitchenPage() {
                       </ul>
                     </div>
 
-                    {/* Instructions */}
                     <div>
                       <p className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-2">Instructions</p>
                       <ol className="space-y-2">
@@ -183,7 +210,6 @@ export default function PlantKitchenPage() {
                       </ol>
                     </div>
 
-                    {/* Pro tips */}
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 space-y-1">
                       <p className="text-amber-400 text-xs font-semibold uppercase tracking-wider mb-2">Pro Tips</p>
                       {r.pro_tips.map((tip, i) => (
@@ -194,7 +220,6 @@ export default function PlantKitchenPage() {
                       ))}
                     </div>
 
-                    {/* Upgrade */}
                     <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-3">
                       <p className="text-violet-400 text-xs font-semibold uppercase tracking-wider mb-1">Level Up</p>
                       <p className="text-white/70 text-sm">{r.upgrade}</p>

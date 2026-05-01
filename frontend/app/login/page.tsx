@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, register } = useAuth();
+  const { login, register, loginAsGuest } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -115,7 +115,28 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-white/20 text-xs mt-6">
+        <div className="mt-4">
+          <button
+            onClick={async () => {
+              setLoading(true);
+              setError("");
+              try {
+                await loginAsGuest();
+                window.location.href = "/dashboard";
+              } catch (err: unknown) {
+                setError(err instanceof Error ? err.message : "Guest login failed");
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="w-full py-3 rounded-xl text-white/40 hover:text-white/70 text-sm transition-colors disabled:opacity-40"
+          >
+            Continue as Guest
+          </button>
+        </div>
+
+        <p className="text-center text-white/20 text-xs mt-4">
           Your wellness journey begins here
         </p>
       </div>

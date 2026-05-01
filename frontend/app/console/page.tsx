@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   mediaApi, nexus,
-  MediaImage, MediaGuide, MediaGuideInfo, MediaGuideStep,
+  MediaImage, MediaGuide, MediaGuideInfo,
   MediaQueryResult, NexusChatResponse,
 } from "@/lib/api";
+import { useVoice } from "@/lib/use-voice";
+import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import {
   Monitor, Send, Image as ImageIcon, BookOpen, Sparkles,
@@ -25,6 +27,7 @@ interface ConsoleMessage {
   image?: MediaImage;
   guide?: MediaGuide;
   guideList?: MediaGuideInfo[];
+  via?: "text" | "voice";
   timestamp: Date;
 }
 
@@ -44,7 +47,6 @@ const QUICK_PROMPTS = [
 function ImageCard({ image }: { image: MediaImage }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
-
   return (
     <div className="rounded-2xl overflow-hidden border border-white/10 bg-white/5 max-w-lg">
       {!loaded && !error && (
@@ -90,81 +92,6 @@ function ImageCard({ image }: { image: MediaImage }) {
   );
 }
 
-function GuideCard({ guide }: { guide: MediaGuide }) {
-  const [step, setStep] = useState(0);
-  const current = guide.steps[step];
-
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden max-w-2xl w-full">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border-b border-white/10 p-4">
-        <div className="flex items-center gap-2 mb-1">
-          <BookOpen className="w-4 h-4 text-violet-400" />
-          <span className="text-violet-400 text-xs font-semibold uppercase tracking-wider">Visual Guide</span>
-        </div>
-        <h3 className="text-white font-bold text-lg">{guide.title}</h3>
-        <p className="text-white/50 text-sm">{guide.subtitle}</p>
-        {/* Step progress */}
-        <div className="flex gap-1 mt-3">
-          {guide.steps.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setStep(i)}
-              className={cn(
-                "h-1.5 rounded-full transition-all",
-                i === step ? "bg-violet-400 flex-[2]" : "bg-white/20 flex-1"
-              )}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Step content */}
-      <div className="p-4 space-y-4">
-        {/* Step image */}
-        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10">
-          <StepImage image={current.image} />
-        </div>
-
-        {/* Step info */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">{current.icon}</span>
-            <div>
-              <p className="text-white/40 text-xs">Step {current.step_number} of {guide.total_steps}</p>
-              <h4 className="text-white font-semibold">{current.title}</h4>
-            </div>
-          </div>
-          <p className="text-white/70 text-sm leading-relaxed">{current.description}</p>
-          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
-            <p className="text-emerald-400 text-xs font-semibold mb-1">Action</p>
-            <p className="text-white/80 text-sm">{current.action}</p>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={step === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4" /> Previous
-          </button>
-          <span className="text-white/30 text-xs">{step + 1} / {guide.total_steps}</span>
-          <button
-            onClick={() => setStep((s) => Math.min(guide.total_steps - 1, s + 1))}
-            disabled={step === guide.total_steps - 1}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            Next <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function StepImage({ image }: { image: MediaImage }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -195,13 +122,69 @@ function StepImage({ image }: { image: MediaImage }) {
   );
 }
 
-function GuideListCard({
-  guides,
-  onSelect,
-}: {
-  guides: MediaGuideInfo[];
-  onSelect: (id: string) => void;
-}) {
+function GuideCard({ guide }: { guide: MediaGuide }) {
+  const [step, setStep] = useState(0);
+  const current = guide.steps[step];
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden max-w-2xl w-full">
+      <div className="bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border-b border-white/10 p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <BookOpen className="w-4 h-4 text-violet-400" />
+          <span className="text-violet-400 text-xs font-semibold uppercase tracking-wider">Visual Guide</span>
+        </div>
+        <h3 className="text-white font-bold text-lg">{guide.title}</h3>
+        <p className="text-white/50 text-sm">{guide.subtitle}</p>
+        <div className="flex gap-1 mt-3">
+          {guide.steps.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setStep(i)}
+              className={cn("h-1.5 rounded-full transition-all", i === step ? "bg-violet-400 flex-[2]" : "bg-white/20 flex-1")}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10">
+          <StepImage image={current.image} />
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{current.icon}</span>
+            <div>
+              <p className="text-white/40 text-xs">Step {current.step_number} of {guide.total_steps}</p>
+              <h4 className="text-white font-semibold">{current.title}</h4>
+            </div>
+          </div>
+          <p className="text-white/70 text-sm leading-relaxed">{current.description}</p>
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
+            <p className="text-emerald-400 text-xs font-semibold mb-1">Action</p>
+            <p className="text-white/80 text-sm">{current.action}</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between pt-2">
+          <button
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            disabled={step === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" /> Previous
+          </button>
+          <span className="text-white/30 text-xs">{step + 1} / {guide.total_steps}</span>
+          <button
+            onClick={() => setStep((s) => Math.min(guide.total_steps - 1, s + 1))}
+            disabled={step === guide.total_steps - 1}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Next <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GuideListCard({ guides, onSelect }: { guides: MediaGuideInfo[]; onSelect: (id: string) => void }) {
   return (
     <div className="space-y-2 max-w-lg w-full">
       <p className="text-white/50 text-sm mb-3">Available visual guides:</p>
@@ -232,7 +215,7 @@ export default function ConsolePage() {
       id: "welcome",
       role: "nexus",
       type: "text",
-      text: "Welcome to the Nexus Console. I can generate images, show step-by-step visual guides, and answer questions with rich visuals. Try asking me to show you a protocol, generate an image, or visualize a concept.",
+      text: "Welcome to the Nexus Console. Ask me anything — by voice or text. I can generate images, show step-by-step visual guides, and answer wellness questions. Tap the mic to speak.",
       timestamp: new Date(),
     },
   ]);
@@ -242,13 +225,28 @@ export default function ConsolePage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // ── Voice ──────────────────────────────────────────────────────────────────
+  const voice = useVoice({
+    voice: "nova",
+    ttsEnabled: true,
+    onTranscript: (text) => {
+      addMessage({ role: "user", type: "text", text, via: "voice" });
+    },
+    onResponse: (r) => {
+      addMessage({ role: "nexus", type: "text", text: r.response_text, via: "voice" });
+    },
+    onError: (err) => {
+      addMessage({ role: "nexus", type: "error", text: `Voice error: ${err.message}` });
+    },
+  });
+
   useEffect(() => {
     mediaApi.config().then((c) => setDalleAvailable(c.dalle_available)).catch(() => {});
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, voice.state]);
 
   const addMessage = (msg: Omit<ConsoleMessage, "id" | "timestamp">) => {
     setMessages((p) => [
@@ -260,38 +258,31 @@ export default function ConsolePage() {
   const handleQuery = async (query: string) => {
     if (!query.trim() || loading) return;
     setInput("");
-    addMessage({ role: "user", type: "text", text: query });
+    addMessage({ role: "user", type: "text", text: query, via: "text" });
     setLoading(true);
 
     try {
       const result: MediaQueryResult = await mediaApi.query(query);
 
       if (result.type === "image") {
-        const img = result.data as MediaImage;
-        addMessage({ role: "nexus", type: "image", image: img });
+        addMessage({ role: "nexus", type: "image", image: result.data as MediaImage });
       } else if (result.type === "guide") {
-        const guide = result.data as MediaGuide;
-        addMessage({ role: "nexus", type: "guide", guide });
+        addMessage({ role: "nexus", type: "guide", guide: result.data as MediaGuide });
       } else if (result.type === "guide_list") {
-        const list = result.data as MediaGuideInfo[];
-        addMessage({ role: "nexus", type: "guide_list", guideList: list });
+        addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
       }
 
-      // Also get a text response from Nexus chat
+      // Text response from Nexus chat
       try {
         const chat: NexusChatResponse = await nexus.chat(query);
         if (chat.response) {
-          addMessage({ role: "nexus", type: "text", text: chat.response });
+          addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
         }
       } catch {
         // text response is optional
       }
     } catch {
-      addMessage({
-        role: "nexus",
-        type: "error",
-        text: "Something went wrong generating media. Please try again.",
-      });
+      addMessage({ role: "nexus", type: "error", text: "Something went wrong. Please try again." });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -311,6 +302,8 @@ export default function ConsolePage() {
     }
   };
 
+  const isBusy = loading || voice.isProcessing;
+
   return (
     <div className="flex flex-col h-[calc(100dvh-56px)] md:h-screen max-w-4xl mx-auto">
       {/* Header */}
@@ -321,13 +314,13 @@ export default function ConsolePage() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-white leading-none">Nexus Console</h1>
-            <p className="text-white/40 text-xs">Visual intelligence · images · guides</p>
+            <p className="text-white/40 text-xs">Visual intelligence · voice · images · guides</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {dalleAvailable ? (
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
-              <Zap className="w-3 h-3" /> DALL·E 3 active
+              <Zap className="w-3 h-3" /> DALL·E 3
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-xs text-white/30 bg-white/5 px-2 py-1 rounded-full">
@@ -343,7 +336,7 @@ export default function ConsolePage() {
           <button
             key={p.label}
             onClick={() => handleQuery(p.query)}
-            disabled={loading}
+            disabled={isBusy}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-white/5 text-white/50 hover:text-white hover:bg-violet-600/30 transition-all whitespace-nowrap flex-shrink-0 disabled:opacity-40"
           >
             <span>{p.icon}</span> {p.label}
@@ -365,7 +358,6 @@ export default function ConsolePage() {
             )}
 
             <div className={cn("max-w-[90%] space-y-2", msg.role === "user" && "items-end flex flex-col")}>
-              {/* Text bubble */}
               {msg.type === "text" && msg.text && (
                 <div className={cn(
                   "rounded-2xl px-4 py-3 text-sm leading-relaxed",
@@ -373,28 +365,19 @@ export default function ConsolePage() {
                     ? "bg-violet-600 text-white"
                     : "bg-white/5 border border-white/10 text-white/80"
                 )}>
+                  {msg.via === "voice" && msg.role === "user" && (
+                    <span className="text-violet-300/60 text-xs mr-2">🎤</span>
+                  )}
                   {msg.text}
                 </div>
               )}
-
-              {/* Error */}
               {msg.type === "error" && (
                 <div className="rounded-2xl px-4 py-3 text-sm bg-rose-500/10 border border-rose-500/20 text-rose-300">
                   {msg.text}
                 </div>
               )}
-
-              {/* Image */}
-              {msg.type === "image" && msg.image && (
-                <ImageCard image={msg.image} />
-              )}
-
-              {/* Visual guide */}
-              {msg.type === "guide" && msg.guide && (
-                <GuideCard guide={msg.guide} />
-              )}
-
-              {/* Guide list */}
+              {msg.type === "image" && msg.image && <ImageCard image={msg.image} />}
+              {msg.type === "guide" && msg.guide && <GuideCard guide={msg.guide} />}
               {msg.type === "guide_list" && msg.guideList && (
                 <GuideListCard guides={msg.guideList} onSelect={loadGuide} />
               )}
@@ -402,7 +385,8 @@ export default function ConsolePage() {
           </div>
         ))}
 
-        {loading && (
+        {/* Loading indicator */}
+        {(loading || voice.isProcessing) && (
           <div className="flex gap-3 items-center">
             <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
               <Monitor className="w-3.5 h-3.5 text-white animate-pulse" />
@@ -418,31 +402,60 @@ export default function ConsolePage() {
         <div ref={bottomRef} className="h-2" />
       </div>
 
-      {/* Input */}
-      <div className="flex-shrink-0 px-4 pb-4 pt-2">
+      {/* Input bar */}
+      <div className="flex-shrink-0 px-4 pb-4 pt-2 space-y-2">
+        {/* Voice status */}
+        <VoiceStatusLabel state={voice.state} error={voice.error} />
+
         <div className="flex gap-2 items-center">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleQuery(input)}
-            placeholder="Ask for an image, guide, or visual explanation…"
+          {/* Text input — hidden while recording/speaking */}
+          {voice.state === "idle" || voice.state === "error" ? (
+            <>
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleQuery(input)}
+                placeholder="Ask for an image, guide, or wellness question…"
+                disabled={isBusy}
+                className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm placeholder:text-white/25 focus:outline-none focus:border-violet-500/50 transition-colors disabled:opacity-50"
+              />
+              <button
+                onClick={() => handleQuery(input)}
+                disabled={isBusy || !input.trim()}
+                className="w-11 h-11 flex-shrink-0 rounded-2xl bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all flex items-center justify-center disabled:opacity-40"
+                aria-label="Send"
+              >
+                {loading
+                  ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  : <Send className="w-4 h-4 text-white" />
+                }
+              </button>
+            </>
+          ) : (
+            // While recording/processing/speaking, show a full-width status
+            <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white/40 text-sm">
+              {voice.state === "recording" && "Listening…"}
+              {voice.state === "processing" && "Processing your question…"}
+              {voice.state === "speaking" && "Speaking response…"}
+            </div>
+          )}
+
+          {/* Mic button — always visible */}
+          <VoiceButton
+            state={voice.state}
+            onStart={voice.startRecording}
+            onStop={voice.stopRecording}
+            onCancel={voice.cancelRecording}
+            onStopSpeaking={voice.stopSpeaking}
             disabled={loading}
-            className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-white text-sm placeholder:text-white/25 focus:outline-none focus:border-violet-500/50 transition-colors disabled:opacity-50"
+            size="md"
           />
-          <button
-            onClick={() => handleQuery(input)}
-            disabled={loading || !input.trim()}
-            className="w-11 h-11 flex-shrink-0 rounded-2xl bg-violet-600 hover:bg-violet-500 active:scale-95 transition-all flex items-center justify-center disabled:opacity-40"
-          >
-            {loading ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
-          </button>
         </div>
-        <p className="text-white/20 text-[11px] text-center mt-2">
-          {dalleAvailable
-            ? "DALL·E 3 active — images are AI-generated"
-            : "Add OpenAI credits to enable DALL·E 3 image generation"}
+
+        <p className="text-white/20 text-[11px] text-center">
+          Tap mic to speak · tap again to send · right-click mic to cancel
         </p>
       </div>
     </div>

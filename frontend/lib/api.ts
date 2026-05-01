@@ -22,13 +22,24 @@ async function request<T>(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
 
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail ?? "Request failed");
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail ?? "Request failed");
+    }
+    return res.json() as Promise<T>;
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json() as Promise<T>;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -43,6 +54,11 @@ export const auth = {
     request<{ access_token: string; refresh_token: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
+    }),
+
+  guest: () =>
+    request<{ access_token: string; refresh_token: string }>("/auth/guest", {
+      method: "POST",
     }),
 };
 

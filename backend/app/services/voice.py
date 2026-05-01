@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 DEFAULT_VOICE = "nova"
 DEFAULT_TTS_MODEL = "tts-1"
 DEFAULT_STT_MODEL = "whisper-1"
+# Groq uses a different model name for Whisper
+GROQ_STT_MODEL = "whisper-large-v3-turbo"
 # Audio format returned by TTS — mp3 is universally supported in browsers
 TTS_RESPONSE_FORMAT = "mp3"
 
@@ -80,19 +82,20 @@ class VoiceService:
             log.warning("VoiceService: no API key set — STT unavailable")
             return {"transcript": "", "language": None, "duration": None, "configured": False}
 
-        # Try Groq Whisper first (free), fall back to OpenAI Whisper
-        providers = []
+        # Try Groq Whisper first (free), fall back to OpenAI Whisper.
+        # Groq requires "whisper-large-v3-turbo"; OpenAI uses "whisper-1".
+        providers: list[tuple[str, str, str]] = []
         if self._groq_key:
-            providers.append((self._groq_base, self._groq_key))
+            providers.append((self._groq_base, self._groq_key, GROQ_STT_MODEL))
         if self._openai_key:
-            providers.append((self._openai_base, self._openai_key))
+            providers.append((self._openai_base, self._openai_key, DEFAULT_STT_MODEL))
 
         last_exc: Exception | None = None
-        for base_url, api_key in providers:
+        for base_url, api_key, stt_model in providers:
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     files = {"file": (filename, io.BytesIO(audio_bytes), _mime_for(filename))}
-                    data: dict[str, str] = {"model": DEFAULT_STT_MODEL, "response_format": "json"}
+                    data: dict[str, str] = {"model": stt_model, "response_format": "json"}
                     if language:
                         data["language"] = language
                     resp = await client.post(

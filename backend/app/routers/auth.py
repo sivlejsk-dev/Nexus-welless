@@ -1,4 +1,4 @@
-"""Authentication endpoints — register, login, refresh, me."""
+"""Authentication endpoints — register, login, refresh, guest."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError
@@ -13,6 +13,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.base import get_db
+from app.middleware.auth import GUEST_EMAIL, _get_or_create_guest
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse, UserOut
 
@@ -54,6 +55,16 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
+    )
+
+
+@router.post("/guest", response_model=TokenResponse)
+async def guest_login(db: AsyncSession = Depends(get_db)):
+    """Issue a JWT for the shared guest account — no credentials required."""
+    guest = await _get_or_create_guest(db)
+    return TokenResponse(
+        access_token=create_access_token(str(guest.id)),
+        refresh_token=create_refresh_token(str(guest.id)),
     )
 
 

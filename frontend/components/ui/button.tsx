@@ -12,21 +12,27 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={cn(
-          "inline-flex items-center justify-center rounded-xl font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed",
+          "inline-flex items-center justify-center font-medium transition-all duration-200",
+          "disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent",
           {
-            "bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:from-violet-500 hover:to-indigo-500 shadow-lg shadow-violet-500/25":
+            // Primary — gradient with glow
+            "bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500":
               variant === "primary",
-            "bg-white/10 text-white border border-white/20 hover:bg-white/20":
+            // Secondary — glass
+            "glass-2 text-white/80 rounded-xl hover:text-white hover:border-white/20":
               variant === "secondary",
-            "text-white/70 hover:text-white hover:bg-white/10":
+            // Ghost — transparent
+            "text-white/50 rounded-xl hover:text-white hover:bg-white/6":
               variant === "ghost",
-            "bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30":
+            // Danger
+            "bg-rose-500/15 text-rose-400 border border-rose-500/25 rounded-xl hover:bg-rose-500/25":
               variant === "danger",
           },
           {
-            "px-3 py-1.5 text-sm": size === "sm",
-            "px-5 py-2.5 text-sm": size === "md",
-            "px-7 py-3.5 text-base": size === "lg",
+            "px-3 py-1.5 text-xs gap-1.5": size === "sm",
+            "px-4 py-2.5 text-sm gap-2":   size === "md",
+            "px-6 py-3 text-sm gap-2":     size === "lg",
           },
           className
         )}
