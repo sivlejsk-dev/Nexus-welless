@@ -4,20 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import {
   mediaApi, nexus,
   MediaImage, MediaGuide, MediaGuideInfo,
-  MediaQueryResult, NexusChatResponse,
+  MediaQueryResult, NexusChatResponse, MediaVideo,
 } from "@/lib/api";
+import {
+  fallbackGuideList,
+  fallbackVideos,
+  getFallbackGuide,
+  getFallbackMedia,
+} from "@/lib/media-fallback";
 import { useVoice } from "@/lib/use-voice";
 import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import {
   Monitor, Send, Image as ImageIcon, BookOpen, Sparkles,
-  ChevronRight, ChevronLeft, Loader2, Zap, ExternalLink,
+  ChevronRight, ChevronLeft, Loader2, Zap, ExternalLink, AlertCircle, RotateCcw,
+  Video, PlayCircle, CheckCircle2, Compass, WifiOff,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MessageRole = "user" | "nexus";
-type MessageType = "text" | "image" | "guide" | "guide_list" | "error";
+type MessageType = "text" | "image" | "video" | "guide" | "guide_list" | "error";
+type MediaMode = "auto" | "image" | "video" | "guide";
 
 interface ConsoleMessage {
   id: string;
@@ -25,9 +33,11 @@ interface ConsoleMessage {
   type: MessageType;
   text?: string;
   image?: MediaImage;
+  video?: MediaVideo;
   guide?: MediaGuide;
   guideList?: MediaGuideInfo[];
   via?: "text" | "voice";
+  retryQuery?: string; // Query to retry if this is an error message
   timestamp: Date;
 }
 
@@ -37,6 +47,7 @@ const QUICK_PROMPTS = [
   { label: "Anti-inflammatory guide", query: "show me the anti-inflammatory protocol steps", icon: "🔥" },
   { label: "Gut healing 5R", query: "how to heal my gut with the 5R protocol", icon: "🦠" },
   { label: "Morning ritual", query: "show me a morning wellness routine", icon: "🌅" },
+  { label: "Breathwork video", query: "show me a breathwork video", icon: "▶️" },
   { label: "Plant meat mastery", query: "guide to making plant-based meat substitutes", icon: "🌿" },
   { label: "Visualize turmeric", query: "generate an image of turmeric and anti-inflammatory foods", icon: "🎨" },
   { label: "Healing foods image", query: "show me an image of a healing anti-inflammatory meal", icon: "🥗" },
@@ -44,48 +55,74 @@ const QUICK_PROMPTS = [
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function VisualFallback({ image, compact = false }: { image: MediaImage; compact?: boolean }) {
+  return (
+    <div className={cn(
+      "w-full flex flex-col items-center justify-center bg-gradient-to-br from-violet-950/70 via-slate-900 to-emerald-950/60 text-center",
+      compact ? "h-32" : "h-56",
+    )}>
+      <ImageIcon className="w-8 h-8 text-white/25 mb-2" />
+      <p className="text-white/60 text-sm font-medium">{image.prompt ?? "Wellness visual"}</p>
+      <p className="text-white/30 text-xs mt-1">Local visual fallback</p>
+    </div>
+  );
+}
+
 function ImageCard({ image }: { image: MediaImage }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  
   return (
-    <div className="rounded-2xl overflow-hidden border border-white/10 bg-white/5 max-w-lg">
+    <div className="rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-br from-white/5 to-white/2 max-w-lg shadow-lg hover:shadow-xl transition-shadow duration-300">
       {!loaded && !error && (
-        <div className="w-full h-64 flex items-center justify-center bg-white/5">
-          <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+        <div className="w-full h-64 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+            <p className="text-white/40 text-xs">Loading image...</p>
+          </div>
         </div>
       )}
       {error && (
-        <div className="w-full h-48 flex flex-col items-center justify-center bg-white/5 gap-2">
-          <ImageIcon className="w-8 h-8 text-white/20" />
-          <p className="text-white/30 text-sm">Image unavailable</p>
-        </div>
+        <VisualFallback image={image} />
       )}
       {!error && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={image.url}
           alt={image.prompt ?? "Wellness image"}
-          className={cn("w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          className={cn("w-full object-cover transition-all duration-500", loaded ? "opacity-100 scale-100" : "opacity-0 scale-95")}
           style={{ maxHeight: 400 }}
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
+          loading="lazy"
         />
       )}
-      <div className="p-3 space-y-1">
-        {image.source === "dalle-3" && (
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3 h-3 text-violet-400" />
-            <span className="text-violet-400 text-xs font-medium">DALL·E 3</span>
-          </div>
-        )}
-        {image.source === "unsplash" && (
-          <div className="flex items-center gap-1.5">
-            <ExternalLink className="w-3 h-3 text-white/30" />
-            <span className="text-white/30 text-xs">Unsplash (DALL·E unavailable)</span>
-          </div>
-        )}
+      <div className="p-4 space-y-2 bg-white/2 border-t border-white/5">
+        <div className="flex items-center justify-between">
+          {image.source === "dalle-3" && (
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-violet-400 animate-pulse" />
+              <span className="text-violet-400 text-xs font-semibold">DALL·E 3</span>
+            </div>
+          )}
+          {image.source === "unsplash" && (
+            <div className="flex items-center gap-1.5">
+              <ExternalLink className="w-3 h-3 text-white/40" />
+              <span className="text-white/40 text-xs">Unsplash</span>
+            </div>
+          )}
+          {image.source === "local" && (
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span className="text-emerald-400 text-xs font-semibold">Local fallback</span>
+            </div>
+          )}
+        </div>
         {image.revised_prompt && (
-          <p className="text-white/40 text-xs italic leading-relaxed">{image.revised_prompt}</p>
+          <p className="text-white/50 text-xs italic leading-relaxed">{image.revised_prompt}</p>
+        )}
+        {image.prompt && image.source === "dalle-3" && (
+          <p className="text-white/40 text-xs leading-relaxed">{image.prompt}</p>
         )}
       </div>
     </div>
@@ -98,83 +135,173 @@ function StepImage({ image }: { image: MediaImage }) {
   return (
     <>
       {!loaded && !error && (
-        <div className="w-full h-48 flex items-center justify-center">
-          <Loader2 className="w-5 h-5 text-white/30 animate-spin" />
+        <div className="w-full h-48 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
+          <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
         </div>
       )}
       {error && (
-        <div className="w-full h-32 flex items-center justify-center">
-          <ImageIcon className="w-6 h-6 text-white/20" />
-        </div>
+        <VisualFallback image={image} compact />
       )}
       {!error && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={image.url}
           alt="Step illustration"
-          className={cn("w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          className={cn("w-full object-cover transition-all duration-500", loaded ? "opacity-100 scale-100" : "opacity-0 scale-95")}
           style={{ maxHeight: 240 }}
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
+          loading="lazy"
         />
       )}
     </>
   );
 }
 
+function VideoCard({ video }: { video: MediaVideo }) {
+  const [playing, setPlaying] = useState(false);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/2 overflow-hidden max-w-2xl w-full shadow-lg">
+      <div className="relative aspect-video bg-black">
+        {playing ? (
+          <iframe
+            src={`${video.embed_url}?autoplay=1&rel=0`}
+            title={video.title}
+            className="absolute inset-0 h-full w-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <button
+            onClick={() => setPlaying(true)}
+            className="absolute inset-0 w-full h-full text-left group"
+            aria-label={`Play ${video.title}`}
+          >
+            <StepImage image={video.thumbnail} />
+            <div className="absolute inset-0 bg-black/35 group-hover:bg-black/20 transition-colors" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-full bg-white/90 text-slate-950 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
+                <PlayCircle className="w-9 h-9" />
+              </div>
+            </div>
+          </button>
+        )}
+      </div>
+      <div className="p-5 space-y-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Video className="w-4 h-4 text-sky-400" />
+            <span className="text-sky-300 text-xs font-bold uppercase tracking-wider">{video.duration}</span>
+          </div>
+          <h3 className="text-white font-bold text-lg">{video.title}</h3>
+          <p className="text-white/55 text-sm mt-1">{video.description}</p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {video.steps.map((item, index) => (
+            <div key={item} className="flex items-center gap-2 rounded-xl bg-white/[0.04] border border-white/10 px-3 py-2">
+              <span className="text-sky-300 text-xs font-mono">{String(index + 1).padStart(2, "0")}</span>
+              <span className="text-white/70 text-sm">{item}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GuideCard({ guide }: { guide: MediaGuide }) {
   const [step, setStep] = useState(0);
   const current = guide.steps[step];
+  const progress = ((step + 1) / guide.total_steps) * 100;
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden max-w-2xl w-full">
-      <div className="bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border-b border-white/10 p-4">
-        <div className="flex items-center gap-2 mb-1">
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/2 overflow-hidden max-w-2xl w-full shadow-lg">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-violet-600/30 to-indigo-600/20 border-b border-white/10 p-5">
+        <div className="flex items-center gap-2 mb-2">
           <BookOpen className="w-4 h-4 text-violet-400" />
           <span className="text-violet-400 text-xs font-semibold uppercase tracking-wider">Visual Guide</span>
         </div>
-        <h3 className="text-white font-bold text-lg">{guide.title}</h3>
-        <p className="text-white/50 text-sm">{guide.subtitle}</p>
-        <div className="flex gap-1 mt-3">
+        <h3 className="text-white font-bold text-lg mb-1">{guide.title}</h3>
+        <p className="text-white/50 text-sm mb-4">{guide.subtitle}</p>
+        
+        {/* Progress bar */}
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <span className="text-white/40 text-xs font-medium">Progress</span>
+            <span className="text-white/40 text-xs">{step + 1} / {guide.total_steps}</span>
+          </div>
+          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        
+        {/* Step dots */}
+        <div className="flex gap-1 mt-4">
           {guide.steps.map((_, i) => (
             <button
               key={i}
               onClick={() => setStep(i)}
-              className={cn("h-1.5 rounded-full transition-all", i === step ? "bg-violet-400 flex-[2]" : "bg-white/20 flex-1")}
+              className={cn(
+                "h-2 rounded-full transition-all duration-300",
+                i === step 
+                  ? "bg-violet-400 flex-[2]" 
+                  : i < step 
+                  ? "bg-emerald-500/60" 
+                  : "bg-white/20 flex-1"
+              )}
+              title={`Step ${i + 1}`}
             />
           ))}
         </div>
       </div>
-      <div className="p-4 space-y-4">
-        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10">
+
+      {/* Content */}
+      <div className="p-5 space-y-4">
+        {/* Step image */}
+        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10 shadow-sm">
           <StepImage image={current.image} />
         </div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">{current.icon}</span>
+
+        {/* Step details */}
+        <div className="space-y-3">
+          {/* Header */}
+          <div className="flex items-center gap-3">
+            <span className="text-3xl flex-shrink-0">{current.icon}</span>
             <div>
-              <p className="text-white/40 text-xs">Step {current.step_number} of {guide.total_steps}</p>
-              <h4 className="text-white font-semibold">{current.title}</h4>
+              <p className="text-white/40 text-xs font-medium">Step {current.step_number} of {guide.total_steps}</p>
+              <h4 className="text-white font-bold text-base">{current.title}</h4>
             </div>
           </div>
+
+          {/* Description */}
           <p className="text-white/70 text-sm leading-relaxed">{current.description}</p>
-          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
-            <p className="text-emerald-400 text-xs font-semibold mb-1">Action</p>
-            <p className="text-white/80 text-sm">{current.action}</p>
+
+          {/* Action box */}
+          <div className="bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-4 backdrop-blur-sm">
+            <p className="text-emerald-400 text-xs font-bold mb-2 uppercase tracking-wider">Action</p>
+            <p className="text-white/85 text-sm leading-relaxed">{current.action}</p>
           </div>
         </div>
-        <div className="flex items-center justify-between pt-2">
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between pt-2 gap-2">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <ChevronLeft className="w-4 h-4" /> Previous
           </button>
-          <span className="text-white/30 text-xs">{step + 1} / {guide.total_steps}</span>
+          <span className="text-white/30 text-xs font-medium">{step + 1} / {guide.total_steps}</span>
           <button
             onClick={() => setStep((s) => Math.min(guide.total_steps - 1, s + 1))}
             disabled={step === guide.total_steps - 1}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>
@@ -222,6 +349,8 @@ export default function ConsolePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [dalleAvailable, setDalleAvailable] = useState(false);
+  const [offlineMedia, setOfflineMedia] = useState(false);
+  const [mediaMode, setMediaMode] = useState<MediaMode>("auto");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -241,7 +370,15 @@ export default function ConsolePage() {
   });
 
   useEffect(() => {
-    mediaApi.config().then((c) => setDalleAvailable(c.dalle_available)).catch(() => {});
+    mediaApi.config()
+      .then((c) => {
+        setDalleAvailable(c.dalle_available);
+        setOfflineMedia(false);
+      })
+      .catch(() => {
+        setDalleAvailable(false);
+        setOfflineMedia(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -255,34 +392,82 @@ export default function ConsolePage() {
     ]);
   };
 
-  const handleQuery = async (query: string) => {
+  const pushMediaResult = (result: MediaQueryResult, query: string) => {
+    if (result.type === "image") {
+      const image = result.data as MediaImage;
+      addMessage(
+        image.url
+          ? { role: "nexus", type: "image", image }
+          : { role: "nexus", type: "error", text: "Image URL not available. Please try another query.", retryQuery: query },
+      );
+      return;
+    }
+
+    if (result.type === "video") {
+      addMessage({ role: "nexus", type: "video", video: result.data as MediaVideo });
+      return;
+    }
+
+    if (result.type === "guide") {
+      const guide = result.data as MediaGuide;
+      addMessage(
+        guide.steps?.length
+          ? { role: "nexus", type: "guide", guide }
+          : { role: "nexus", type: "error", text: "Guide data is incomplete. Please try again.", retryQuery: query },
+      );
+      return;
+    }
+
+    addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
+  };
+
+  const handleQuery = async (query: string, retryCount = 0) => {
     if (!query.trim() || loading) return;
+    
     setInput("");
     addMessage({ role: "user", type: "text", text: query, via: "text" });
     setLoading(true);
 
     try {
-      const result: MediaQueryResult = await mediaApi.query(query);
+      const result = mediaMode === "video"
+        ? getFallbackMedia(query, "video")
+        : await mediaApi.query(query, mediaMode);
+      setOfflineMedia(false);
+      pushMediaResult(result, query);
 
-      if (result.type === "image") {
-        addMessage({ role: "nexus", type: "image", image: result.data as MediaImage });
-      } else if (result.type === "guide") {
-        addMessage({ role: "nexus", type: "guide", guide: result.data as MediaGuide });
-      } else if (result.type === "guide_list") {
-        addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
-      }
-
-      // Text response from Nexus chat
+      // Text response from Nexus chat (optional, non-blocking)
       try {
-        const chat: NexusChatResponse = await nexus.chat(query);
-        if (chat.response) {
-          addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
+        const chatController = new AbortController();
+        const chatTimeoutId = setTimeout(() => chatController.abort(), 10000);
+        try {
+          const chat: NexusChatResponse = await nexus.chat(query);
+          if (chat.response) {
+            addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
+          }
+        } finally {
+          clearTimeout(chatTimeoutId);
         }
-      } catch {
-        // text response is optional
+      } catch (chatErr) {
+        // Chat is optional, fail silently
+        console.debug("Chat response skipped:", chatErr);
       }
-    } catch {
-      addMessage({ role: "nexus", type: "error", text: "Something went wrong. Please try again." });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const fallback = getFallbackMedia(query, mediaMode);
+      setOfflineMedia(true);
+      pushMediaResult(fallback, query);
+      addMessage({
+        role: "nexus",
+        type: "text",
+        text: "I could not reach the media service, so I loaded a local wellness result instead.",
+      });
+      
+      if (retryCount < 1 && mediaMode !== "auto" && (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout"))) {
+        addMessage({ role: "nexus", type: "text", text: "Retrying your request..." });
+        setTimeout(() => handleQuery(query, retryCount + 1), 1500);
+      }
+
+      console.warn("Media query fell back to local content.", { error, retryCount });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -294,18 +479,47 @@ export default function ConsolePage() {
     addMessage({ role: "user", type: "text", text: `Show me the ${guideId.replace(/-/g, " ")} guide` });
     try {
       const guide = await mediaApi.guide(guideId, false);
-      addMessage({ role: "nexus", type: "guide", guide });
-    } catch {
-      addMessage({ role: "nexus", type: "error", text: "Could not load guide." });
+      setOfflineMedia(false);
+      if (guide.steps && guide.steps.length > 0) {
+        addMessage({ role: "nexus", type: "guide", guide });
+      } else {
+        addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete.", retryQuery: guideId });
+      }
+    } catch (error) {
+      const fallbackGuide = getFallbackGuide(guideId);
+      if (fallbackGuide) {
+        setOfflineMedia(true);
+        addMessage({ role: "nexus", type: "guide", guide: fallbackGuide });
+        addMessage({
+          role: "nexus",
+          type: "text",
+          text: "I could not reach the guide service, so I opened the local guide version.",
+        });
+        return;
+      }
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      addMessage({ 
+        role: "nexus", 
+        type: "error", 
+        text: `Could not load guide. ${errorMessage.substring(0, 50)}`,
+        retryQuery: guideId 
+      });
+      console.warn("Guide load failed.", error);
     } finally {
       setLoading(false);
     }
   };
 
   const isBusy = loading || voice.isProcessing;
+  const modeOptions: Array<{ id: MediaMode; label: string; icon: typeof Compass }> = [
+    { id: "auto", label: "Auto", icon: Compass },
+    { id: "image", label: "Images", icon: ImageIcon },
+    { id: "video", label: "Videos", icon: Video },
+    { id: "guide", label: "Guides", icon: BookOpen },
+  ];
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-56px)] md:h-screen max-w-4xl mx-auto">
+    <div className="flex flex-col h-[calc(100dvh-56px)] md:h-screen max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/5 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -321,6 +535,10 @@ export default function ConsolePage() {
           {dalleAvailable ? (
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
               <Zap className="w-3 h-3" /> DALL·E 3
+            </span>
+          ) : offlineMedia ? (
+            <span className="flex items-center gap-1.5 text-xs text-amber-300 bg-amber-400/10 px-2 py-1 rounded-full">
+              <WifiOff className="w-3 h-3" /> Local media
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-xs text-white/30 bg-white/5 px-2 py-1 rounded-full">
@@ -344,8 +562,39 @@ export default function ConsolePage() {
         ))}
       </div>
 
+      <div className="flex items-center justify-between gap-3 px-4 pb-3 border-b border-white/5 flex-shrink-0">
+        <div className="flex gap-1 rounded-2xl bg-white/[0.04] border border-white/10 p-1">
+          {modeOptions.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                key={option.id}
+                onClick={() => setMediaMode(option.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-all",
+                  mediaMode === option.id
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-white/45 hover:text-white hover:bg-white/10",
+                )}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => addMessage({ role: "nexus", type: "guide_list", guideList: fallbackGuideList() })}
+          className="hidden sm:flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/55 hover:text-white hover:bg-white/10 transition-all"
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          Browse guides
+        </button>
+      </div>
+
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-5 min-h-0">
+      <div className="flex-1 min-h-0 grid lg:grid-cols-[1fr_260px]">
+      <div className="overflow-y-auto px-4 py-2 space-y-5 min-h-0">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -372,11 +621,24 @@ export default function ConsolePage() {
                 </div>
               )}
               {msg.type === "error" && (
-                <div className="rounded-2xl px-4 py-3 text-sm bg-rose-500/10 border border-rose-500/20 text-rose-300">
-                  {msg.text}
+                <div className="space-y-2 max-w-sm">
+                  <div className="rounded-2xl px-4 py-3 text-sm bg-gradient-to-br from-rose-500/20 to-rose-500/10 border border-rose-500/30 text-rose-200 flex gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{msg.text}</span>
+                  </div>
+                  {msg.retryQuery && (
+                    <button
+                      onClick={() => handleQuery(msg.retryQuery!)}
+                      disabled={loading}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 hover:text-white border border-white/10 transition-all disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Try Again
+                    </button>
+                  )}
                 </div>
               )}
               {msg.type === "image" && msg.image && <ImageCard image={msg.image} />}
+              {msg.type === "video" && msg.video && <VideoCard video={msg.video} />}
               {msg.type === "guide" && msg.guide && <GuideCard guide={msg.guide} />}
               {msg.type === "guide_list" && msg.guideList && (
                 <GuideListCard guides={msg.guideList} onSelect={loadGuide} />
@@ -400,6 +662,38 @@ export default function ConsolePage() {
           </div>
         )}
         <div ref={bottomRef} className="h-2" />
+      </div>
+
+      <aside className="hidden lg:block border-l border-white/5 px-4 py-4 overflow-y-auto">
+        <div className="space-y-5">
+          <div>
+            <p className="text-white/35 text-xs uppercase tracking-wider mb-3">Video picks</p>
+            <div className="space-y-2">
+              {fallbackVideos.map((video) => (
+                <button
+                  key={video.id}
+                  onClick={() => {
+                    addMessage({ role: "user", type: "text", text: video.title });
+                    addMessage({ role: "nexus", type: "video", video });
+                  }}
+                  className="w-full text-left rounded-xl border border-white/10 bg-white/[0.04] p-3 hover:bg-white/10 hover:border-sky-400/30 transition-all"
+                >
+                  <div className="flex items-center gap-2 text-sky-300 text-xs font-medium">
+                    <Video className="w-3.5 h-3.5" />
+                    {video.duration}
+                  </div>
+                  <p className="mt-1 text-white/80 text-sm font-medium">{video.title}</p>
+                  <p className="mt-1 text-white/35 text-xs line-clamp-2">{video.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-white/35 text-xs uppercase tracking-wider mb-3">Guide library</p>
+            <GuideListCard guides={fallbackGuideList()} onSelect={loadGuide} />
+          </div>
+        </div>
+      </aside>
       </div>
 
       {/* Input bar */}
