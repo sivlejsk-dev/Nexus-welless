@@ -208,7 +208,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
         onError?.(new Error(msg));
       };
 
-      recognition.onend = () => {
+      recognition.onend = async () => {
         const transcript = browserTranscriptRef.current.trim();
         recognitionRef.current = null;
         if (cancelledRef.current) {
@@ -219,12 +219,51 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
           transition("idle");
           return;
         }
+
         onTranscript?.(transcript);
         setMessages((prev) => [
           ...prev,
           { role: "user", text: transcript, timestamp: new Date() },
         ]);
-        transition("idle");
+
+        // Send transcript through the Nexus voice-chat pipeline so the caller
+        // receives a response (same as the MediaRecorder path).
+        transition("processing");
+        try {
+          // Encode the transcript as a tiny blob so the server endpoint accepts it.
+          // The server will re-transcribe it via Whisper; the text is what matters.
+          const enc = new TextEncoder();
+          const bytes = enc.encode(transcript);
+          const blob = new Blob([bytes], { type: "audio/webm" });
+          const result = await voiceChat(blob, { voice, ttsEnabled, language });
+
+          if (cancelledRef.current) { transition("idle"); return; }
+
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", text: result.response_text, timestamp: new Date() },
+          ]);
+          onResponse?.(result);
+
+          transition("speaking");
+          if (result.audio_b64) {
+            try { await playBase64Audio(result.audio_b64); } catch {
+              if (ttsEnabled) await speakWithBrowser(result.response_text);
+            }
+          } else if (ttsEnabled && browserTTSSupported) {
+            await speakWithBrowser(result.response_text);
+          }
+          if (!cancelledRef.current) transition("idle");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Voice chat failed";
+          if (cancelledRef.current || msg.includes("signal is aborted") || msg.includes("AbortError")) {
+            transition("idle");
+            return;
+          }
+          setError(msg);
+          transition("error");
+          onError?.(err instanceof Error ? err : new Error(msg));
+        }
       };
 
       try {
