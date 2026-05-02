@@ -110,8 +110,8 @@ export default function NexusPage() {
         const detail = await nexus.getSession(sessions[0].session_id);
         if (!detail.turns.length) return;
 
-        const restored: Message[] = detail.turns.map((t: NexusTurn) => ({
-          id: `hist-${t.turn_index}-${t.role}`,
+        const restored: Message[] = detail.turns.map((t: NexusTurn, i: number) => ({
+          id: `hist-${i}-${t.turn_index}-${t.role}`,
           role: t.role === "user" ? "user" : "nexus",
           content: t.content,
           via: "history" as const,
