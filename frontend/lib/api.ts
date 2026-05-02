@@ -185,22 +185,37 @@ export async function voiceChat(
   opts: { voice?: string; ttsEnabled?: boolean; language?: string } = {}
 ): Promise<VoiceChatResponse> {
   const token = getToken();
+
+  // Set filename based on blob type
+  let filename = "audio.webm";
+  if (audioBlob.type.includes("mp4")) filename = "audio.mp4";
+  else if (audioBlob.type.includes("ogg")) filename = "audio.ogg";
+  else if (audioBlob.type.includes("wav")) filename = "audio.wav";
+
   const form = new FormData();
-  form.append("audio", audioBlob, "audio.webm");
+  form.append("audio", audioBlob, filename);
   form.append("voice", opts.voice ?? "nova");
-  form.append("tts_enabled", String(opts.ttsEnabled ?? true));
+  form.append("tts_enabled", (opts.ttsEnabled ?? true).toString());
   if (opts.language) form.append("language", opts.language);
 
-  const res = await fetch(`${API}/voice/chat`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? "Voice chat failed");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+
+  try {
+    const res = await fetch(`${API}/voice/chat`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail ?? "Voice chat failed");
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 /** Transcribe audio only (no chat). */

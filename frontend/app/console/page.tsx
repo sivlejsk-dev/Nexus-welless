@@ -11,7 +11,7 @@ import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import {
   Monitor, Send, Image as ImageIcon, BookOpen, Sparkles,
-  ChevronRight, ChevronLeft, Loader2, Zap, ExternalLink,
+  ChevronRight, ChevronLeft, Loader2, Zap, ExternalLink, AlertCircle, RotateCcw,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ interface ConsoleMessage {
   guide?: MediaGuide;
   guideList?: MediaGuideInfo[];
   via?: "text" | "voice";
+  retryQuery?: string; // Query to retry if this is an error message
   timestamp: Date;
 }
 
@@ -47,17 +48,22 @@ const QUICK_PROMPTS = [
 function ImageCard({ image }: { image: MediaImage }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  
   return (
-    <div className="rounded-2xl overflow-hidden border border-white/10 bg-white/5 max-w-lg">
+    <div className="rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-br from-white/5 to-white/2 max-w-lg shadow-lg hover:shadow-xl transition-shadow duration-300">
       {!loaded && !error && (
-        <div className="w-full h-64 flex items-center justify-center bg-white/5">
-          <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
+        <div className="w-full h-64 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+            <p className="text-white/40 text-xs">Loading image...</p>
+          </div>
         </div>
       )}
       {error && (
-        <div className="w-full h-48 flex flex-col items-center justify-center bg-white/5 gap-2">
+        <div className="w-full h-48 flex flex-col items-center justify-center bg-gradient-to-br from-rose-500/10 to-rose-500/5 gap-2">
           <ImageIcon className="w-8 h-8 text-white/20" />
           <p className="text-white/30 text-sm">Image unavailable</p>
+          <p className="text-white/20 text-xs text-center px-4">The image could not be loaded</p>
         </div>
       )}
       {!error && (
@@ -65,27 +71,33 @@ function ImageCard({ image }: { image: MediaImage }) {
         <img
           src={image.url}
           alt={image.prompt ?? "Wellness image"}
-          className={cn("w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          className={cn("w-full object-cover transition-all duration-500", loaded ? "opacity-100 scale-100" : "opacity-0 scale-95")}
           style={{ maxHeight: 400 }}
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
+          loading="lazy"
         />
       )}
-      <div className="p-3 space-y-1">
-        {image.source === "dalle-3" && (
-          <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3 h-3 text-violet-400" />
-            <span className="text-violet-400 text-xs font-medium">DALL·E 3</span>
-          </div>
-        )}
-        {image.source === "unsplash" && (
-          <div className="flex items-center gap-1.5">
-            <ExternalLink className="w-3 h-3 text-white/30" />
-            <span className="text-white/30 text-xs">Unsplash (DALL·E unavailable)</span>
-          </div>
-        )}
+      <div className="p-4 space-y-2 bg-white/2 border-t border-white/5">
+        <div className="flex items-center justify-between">
+          {image.source === "dalle-3" && (
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-violet-400 animate-pulse" />
+              <span className="text-violet-400 text-xs font-semibold">DALL·E 3</span>
+            </div>
+          )}
+          {image.source === "unsplash" && (
+            <div className="flex items-center gap-1.5">
+              <ExternalLink className="w-3 h-3 text-white/40" />
+              <span className="text-white/40 text-xs">Unsplash</span>
+            </div>
+          )}
+        </div>
         {image.revised_prompt && (
-          <p className="text-white/40 text-xs italic leading-relaxed">{image.revised_prompt}</p>
+          <p className="text-white/50 text-xs italic leading-relaxed">{image.revised_prompt}</p>
+        )}
+        {image.prompt && image.source === "dalle-3" && (
+          <p className="text-white/40 text-xs leading-relaxed">{image.prompt}</p>
         )}
       </div>
     </div>
@@ -98,13 +110,13 @@ function StepImage({ image }: { image: MediaImage }) {
   return (
     <>
       {!loaded && !error && (
-        <div className="w-full h-48 flex items-center justify-center">
-          <Loader2 className="w-5 h-5 text-white/30 animate-spin" />
+        <div className="w-full h-48 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
+          <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
         </div>
       )}
       {error && (
-        <div className="w-full h-32 flex items-center justify-center">
-          <ImageIcon className="w-6 h-6 text-white/20" />
+        <div className="w-full h-32 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
+          <ImageIcon className="w-6 h-6 text-white/15" />
         </div>
       )}
       {!error && (
@@ -112,10 +124,11 @@ function StepImage({ image }: { image: MediaImage }) {
         <img
           src={image.url}
           alt="Step illustration"
-          className={cn("w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          className={cn("w-full object-cover transition-all duration-500", loaded ? "opacity-100 scale-100" : "opacity-0 scale-95")}
           style={{ maxHeight: 240 }}
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
+          loading="lazy"
         />
       )}
     </>
@@ -125,56 +138,95 @@ function StepImage({ image }: { image: MediaImage }) {
 function GuideCard({ guide }: { guide: MediaGuide }) {
   const [step, setStep] = useState(0);
   const current = guide.steps[step];
+  const progress = ((step + 1) / guide.total_steps) * 100;
+
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden max-w-2xl w-full">
-      <div className="bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border-b border-white/10 p-4">
-        <div className="flex items-center gap-2 mb-1">
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/2 overflow-hidden max-w-2xl w-full shadow-lg">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-violet-600/30 to-indigo-600/20 border-b border-white/10 p-5">
+        <div className="flex items-center gap-2 mb-2">
           <BookOpen className="w-4 h-4 text-violet-400" />
           <span className="text-violet-400 text-xs font-semibold uppercase tracking-wider">Visual Guide</span>
         </div>
-        <h3 className="text-white font-bold text-lg">{guide.title}</h3>
-        <p className="text-white/50 text-sm">{guide.subtitle}</p>
-        <div className="flex gap-1 mt-3">
+        <h3 className="text-white font-bold text-lg mb-1">{guide.title}</h3>
+        <p className="text-white/50 text-sm mb-4">{guide.subtitle}</p>
+        
+        {/* Progress bar */}
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <span className="text-white/40 text-xs font-medium">Progress</span>
+            <span className="text-white/40 text-xs">{step + 1} / {guide.total_steps}</span>
+          </div>
+          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        
+        {/* Step dots */}
+        <div className="flex gap-1 mt-4">
           {guide.steps.map((_, i) => (
             <button
               key={i}
               onClick={() => setStep(i)}
-              className={cn("h-1.5 rounded-full transition-all", i === step ? "bg-violet-400 flex-[2]" : "bg-white/20 flex-1")}
+              className={cn(
+                "h-2 rounded-full transition-all duration-300",
+                i === step 
+                  ? "bg-violet-400 flex-[2]" 
+                  : i < step 
+                  ? "bg-emerald-500/60" 
+                  : "bg-white/20 flex-1"
+              )}
+              title={`Step ${i + 1}`}
             />
           ))}
         </div>
       </div>
-      <div className="p-4 space-y-4">
-        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10">
+
+      {/* Content */}
+      <div className="p-5 space-y-4">
+        {/* Step image */}
+        <div className="rounded-xl overflow-hidden bg-white/5 border border-white/10 shadow-sm">
           <StepImage image={current.image} />
         </div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">{current.icon}</span>
+
+        {/* Step details */}
+        <div className="space-y-3">
+          {/* Header */}
+          <div className="flex items-center gap-3">
+            <span className="text-3xl flex-shrink-0">{current.icon}</span>
             <div>
-              <p className="text-white/40 text-xs">Step {current.step_number} of {guide.total_steps}</p>
-              <h4 className="text-white font-semibold">{current.title}</h4>
+              <p className="text-white/40 text-xs font-medium">Step {current.step_number} of {guide.total_steps}</p>
+              <h4 className="text-white font-bold text-base">{current.title}</h4>
             </div>
           </div>
+
+          {/* Description */}
           <p className="text-white/70 text-sm leading-relaxed">{current.description}</p>
-          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
-            <p className="text-emerald-400 text-xs font-semibold mb-1">Action</p>
-            <p className="text-white/80 text-sm">{current.action}</p>
+
+          {/* Action box */}
+          <div className="bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-4 backdrop-blur-sm">
+            <p className="text-emerald-400 text-xs font-bold mb-2 uppercase tracking-wider">Action</p>
+            <p className="text-white/85 text-sm leading-relaxed">{current.action}</p>
           </div>
         </div>
-        <div className="flex items-center justify-between pt-2">
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between pt-2 gap-2">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             <ChevronLeft className="w-4 h-4" /> Previous
           </button>
-          <span className="text-white/30 text-xs">{step + 1} / {guide.total_steps}</span>
+          <span className="text-white/30 text-xs font-medium">{step + 1} / {guide.total_steps}</span>
           <button
             onClick={() => setStep((s) => Math.min(guide.total_steps - 1, s + 1))}
             disabled={step === guide.total_steps - 1}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white/50 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>
@@ -255,34 +307,86 @@ export default function ConsolePage() {
     ]);
   };
 
-  const handleQuery = async (query: string) => {
+  const handleQuery = async (query: string, retryCount = 0) => {
     if (!query.trim() || loading) return;
+    
     setInput("");
     addMessage({ role: "user", type: "text", text: query, via: "text" });
     setLoading(true);
 
     try {
-      const result: MediaQueryResult = await mediaApi.query(query);
+      // Add request timeout and retry logic
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      let result: MediaQueryResult;
+      try {
+        result = await mediaApi.query(query);
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (result.type === "image") {
-        addMessage({ role: "nexus", type: "image", image: result.data as MediaImage });
+        const image = result.data as MediaImage;
+        // Validate image URL is reachable
+        if (image.url) {
+          addMessage({ role: "nexus", type: "image", image });
+        } else {
+          addMessage({ role: "nexus", type: "error", text: "Image URL not available. Please try another query." });
+        }
       } else if (result.type === "guide") {
-        addMessage({ role: "nexus", type: "guide", guide: result.data as MediaGuide });
+        const guide = result.data as MediaGuide;
+        if (guide.steps && guide.steps.length > 0) {
+          addMessage({ role: "nexus", type: "guide", guide });
+        } else {
+          addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete. Please try again." });
+        }
       } else if (result.type === "guide_list") {
         addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
       }
 
-      // Text response from Nexus chat
+      // Text response from Nexus chat (optional, non-blocking)
       try {
-        const chat: NexusChatResponse = await nexus.chat(query);
-        if (chat.response) {
-          addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
+        const chatController = new AbortController();
+        const chatTimeoutId = setTimeout(() => chatController.abort(), 10000);
+        try {
+          const chat: NexusChatResponse = await nexus.chat(query);
+          if (chat.response) {
+            addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
+          }
+        } finally {
+          clearTimeout(chatTimeoutId);
         }
-      } catch {
-        // text response is optional
+      } catch (chatErr) {
+        // Chat is optional, fail silently
+        console.debug("Chat response skipped:", chatErr);
       }
-    } catch {
-      addMessage({ role: "nexus", type: "error", text: "Something went wrong. Please try again." });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      
+      // Improve error messages
+      let userMessage = "Unable to fetch media. ";
+      if (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout") || errorMessage.includes("Aborted")) {
+        userMessage += "Connection issue. Try again.";
+      } else if (errorMessage.includes("401") || errorMessage.includes("403")) {
+        userMessage += "Authentication required.";
+      } else if (errorMessage.includes("404")) {
+        userMessage += "Content not found.";
+      } else if (errorMessage.includes("429")) {
+        userMessage += "Server busy. Wait a moment and try again.";
+      } else {
+        userMessage += "Please try a different query.";
+      }
+
+      // Retry logic for network errors
+      if (retryCount < 2 && (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout"))) {
+        addMessage({ role: "nexus", type: "text", text: "Retrying your request..." });
+        setTimeout(() => handleQuery(query, retryCount + 1), 1500);
+      } else {
+        addMessage({ role: "nexus", type: "error", text: userMessage, retryQuery: query });
+      }
+
+      console.error("Query error:", { error, retryCount });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -293,10 +397,28 @@ export default function ConsolePage() {
     setLoading(true);
     addMessage({ role: "user", type: "text", text: `Show me the ${guideId.replace(/-/g, " ")} guide` });
     try {
-      const guide = await mediaApi.guide(guideId, false);
-      addMessage({ role: "nexus", type: "guide", guide });
-    } catch {
-      addMessage({ role: "nexus", type: "error", text: "Could not load guide." });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const guide = await mediaApi.guide(guideId, false);
+        if (guide.steps && guide.steps.length > 0) {
+          addMessage({ role: "nexus", type: "guide", guide });
+        } else {
+          addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete.", retryQuery: guideId });
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      addMessage({ 
+        role: "nexus", 
+        type: "error", 
+        text: `Could not load guide. ${errorMessage.substring(0, 50)}`,
+        retryQuery: guideId 
+      });
+      console.error("Guide load error:", error);
     } finally {
       setLoading(false);
     }
@@ -372,8 +494,20 @@ export default function ConsolePage() {
                 </div>
               )}
               {msg.type === "error" && (
-                <div className="rounded-2xl px-4 py-3 text-sm bg-rose-500/10 border border-rose-500/20 text-rose-300">
-                  {msg.text}
+                <div className="space-y-2 max-w-sm">
+                  <div className="rounded-2xl px-4 py-3 text-sm bg-gradient-to-br from-rose-500/20 to-rose-500/10 border border-rose-500/30 text-rose-200 flex gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{msg.text}</span>
+                  </div>
+                  {msg.retryQuery && (
+                    <button
+                      onClick={() => handleQuery(msg.retryQuery!)}
+                      disabled={loading}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 hover:text-white border border-white/10 transition-all disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Try Again
+                    </button>
+                  )}
                 </div>
               )}
               {msg.type === "image" && msg.image && <ImageCard image={msg.image} />}
