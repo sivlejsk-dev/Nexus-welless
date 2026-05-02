@@ -461,7 +461,7 @@ export interface MediaConfig {
 
 export interface MediaImage {
   url: string;
-  source: "dalle-3" | "unsplash";
+  source: "dalle-3" | "unsplash" | "local";
   prompt: string | null;
   revised_prompt: string | null;
   dalle_available: boolean;
@@ -492,9 +492,20 @@ export interface MediaGuideInfo {
   step_count: number;
 }
 
+export interface MediaVideo {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  duration: string;
+  embed_url: string;
+  thumbnail: MediaImage;
+  steps: string[];
+}
+
 export interface MediaQueryResult {
-  type: "image" | "guide" | "guide_list";
-  data: MediaImage | MediaGuide | MediaGuideInfo[];
+  type: "image" | "guide" | "guide_list" | "video";
+  data: MediaImage | MediaGuide | MediaGuideInfo[] | MediaVideo;
 }
 
 export interface MeatSubBase {

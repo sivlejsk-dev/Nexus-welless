@@ -4,20 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import {
   mediaApi, nexus,
   MediaImage, MediaGuide, MediaGuideInfo,
-  MediaQueryResult, NexusChatResponse,
+  MediaQueryResult, NexusChatResponse, MediaVideo,
 } from "@/lib/api";
+import {
+  fallbackGuideList,
+  fallbackVideos,
+  getFallbackGuide,
+  getFallbackMedia,
+} from "@/lib/media-fallback";
 import { useVoice } from "@/lib/use-voice";
 import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import {
   Monitor, Send, Image as ImageIcon, BookOpen, Sparkles,
   ChevronRight, ChevronLeft, Loader2, Zap, ExternalLink, AlertCircle, RotateCcw,
+  Video, PlayCircle, CheckCircle2, Compass, WifiOff,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MessageRole = "user" | "nexus";
-type MessageType = "text" | "image" | "guide" | "guide_list" | "error";
+type MessageType = "text" | "image" | "video" | "guide" | "guide_list" | "error";
+type MediaMode = "auto" | "image" | "video" | "guide";
 
 interface ConsoleMessage {
   id: string;
@@ -25,6 +33,7 @@ interface ConsoleMessage {
   type: MessageType;
   text?: string;
   image?: MediaImage;
+  video?: MediaVideo;
   guide?: MediaGuide;
   guideList?: MediaGuideInfo[];
   via?: "text" | "voice";
@@ -38,12 +47,26 @@ const QUICK_PROMPTS = [
   { label: "Anti-inflammatory guide", query: "show me the anti-inflammatory protocol steps", icon: "🔥" },
   { label: "Gut healing 5R", query: "how to heal my gut with the 5R protocol", icon: "🦠" },
   { label: "Morning ritual", query: "show me a morning wellness routine", icon: "🌅" },
+  { label: "Breathwork video", query: "show me a breathwork video", icon: "▶️" },
   { label: "Plant meat mastery", query: "guide to making plant-based meat substitutes", icon: "🌿" },
   { label: "Visualize turmeric", query: "generate an image of turmeric and anti-inflammatory foods", icon: "🎨" },
   { label: "Healing foods image", query: "show me an image of a healing anti-inflammatory meal", icon: "🥗" },
 ];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function VisualFallback({ image, compact = false }: { image: MediaImage; compact?: boolean }) {
+  return (
+    <div className={cn(
+      "w-full flex flex-col items-center justify-center bg-gradient-to-br from-violet-950/70 via-slate-900 to-emerald-950/60 text-center",
+      compact ? "h-32" : "h-56",
+    )}>
+      <ImageIcon className="w-8 h-8 text-white/25 mb-2" />
+      <p className="text-white/60 text-sm font-medium">{image.prompt ?? "Wellness visual"}</p>
+      <p className="text-white/30 text-xs mt-1">Local visual fallback</p>
+    </div>
+  );
+}
 
 function ImageCard({ image }: { image: MediaImage }) {
   const [loaded, setLoaded] = useState(false);
@@ -60,11 +83,7 @@ function ImageCard({ image }: { image: MediaImage }) {
         </div>
       )}
       {error && (
-        <div className="w-full h-48 flex flex-col items-center justify-center bg-gradient-to-br from-rose-500/10 to-rose-500/5 gap-2">
-          <ImageIcon className="w-8 h-8 text-white/20" />
-          <p className="text-white/30 text-sm">Image unavailable</p>
-          <p className="text-white/20 text-xs text-center px-4">The image could not be loaded</p>
-        </div>
+        <VisualFallback image={image} />
       )}
       {!error && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -92,6 +111,12 @@ function ImageCard({ image }: { image: MediaImage }) {
               <span className="text-white/40 text-xs">Unsplash</span>
             </div>
           )}
+          {image.source === "local" && (
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span className="text-emerald-400 text-xs font-semibold">Local fallback</span>
+            </div>
+          )}
         </div>
         {image.revised_prompt && (
           <p className="text-white/50 text-xs italic leading-relaxed">{image.revised_prompt}</p>
@@ -115,9 +140,7 @@ function StepImage({ image }: { image: MediaImage }) {
         </div>
       )}
       {error && (
-        <div className="w-full h-32 flex items-center justify-center bg-gradient-to-br from-white/5 to-white/2">
-          <ImageIcon className="w-6 h-6 text-white/15" />
-        </div>
+        <VisualFallback image={image} compact />
       )}
       {!error && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -132,6 +155,58 @@ function StepImage({ image }: { image: MediaImage }) {
         />
       )}
     </>
+  );
+}
+
+function VideoCard({ video }: { video: MediaVideo }) {
+  const [playing, setPlaying] = useState(false);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-white/2 overflow-hidden max-w-2xl w-full shadow-lg">
+      <div className="relative aspect-video bg-black">
+        {playing ? (
+          <iframe
+            src={`${video.embed_url}?autoplay=1&rel=0`}
+            title={video.title}
+            className="absolute inset-0 h-full w-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <button
+            onClick={() => setPlaying(true)}
+            className="absolute inset-0 w-full h-full text-left group"
+            aria-label={`Play ${video.title}`}
+          >
+            <StepImage image={video.thumbnail} />
+            <div className="absolute inset-0 bg-black/35 group-hover:bg-black/20 transition-colors" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-full bg-white/90 text-slate-950 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
+                <PlayCircle className="w-9 h-9" />
+              </div>
+            </div>
+          </button>
+        )}
+      </div>
+      <div className="p-5 space-y-4">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Video className="w-4 h-4 text-sky-400" />
+            <span className="text-sky-300 text-xs font-bold uppercase tracking-wider">{video.duration}</span>
+          </div>
+          <h3 className="text-white font-bold text-lg">{video.title}</h3>
+          <p className="text-white/55 text-sm mt-1">{video.description}</p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {video.steps.map((item, index) => (
+            <div key={item} className="flex items-center gap-2 rounded-xl bg-white/[0.04] border border-white/10 px-3 py-2">
+              <span className="text-sky-300 text-xs font-mono">{String(index + 1).padStart(2, "0")}</span>
+              <span className="text-white/70 text-sm">{item}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -274,6 +349,8 @@ export default function ConsolePage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [dalleAvailable, setDalleAvailable] = useState(false);
+  const [offlineMedia, setOfflineMedia] = useState(false);
+  const [mediaMode, setMediaMode] = useState<MediaMode>("auto");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -293,7 +370,15 @@ export default function ConsolePage() {
   });
 
   useEffect(() => {
-    mediaApi.config().then((c) => setDalleAvailable(c.dalle_available)).catch(() => {});
+    mediaApi.config()
+      .then((c) => {
+        setDalleAvailable(c.dalle_available);
+        setOfflineMedia(false);
+      })
+      .catch(() => {
+        setDalleAvailable(false);
+        setOfflineMedia(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -307,6 +392,35 @@ export default function ConsolePage() {
     ]);
   };
 
+  const pushMediaResult = (result: MediaQueryResult, query: string) => {
+    if (result.type === "image") {
+      const image = result.data as MediaImage;
+      addMessage(
+        image.url
+          ? { role: "nexus", type: "image", image }
+          : { role: "nexus", type: "error", text: "Image URL not available. Please try another query.", retryQuery: query },
+      );
+      return;
+    }
+
+    if (result.type === "video") {
+      addMessage({ role: "nexus", type: "video", video: result.data as MediaVideo });
+      return;
+    }
+
+    if (result.type === "guide") {
+      const guide = result.data as MediaGuide;
+      addMessage(
+        guide.steps?.length
+          ? { role: "nexus", type: "guide", guide }
+          : { role: "nexus", type: "error", text: "Guide data is incomplete. Please try again.", retryQuery: query },
+      );
+      return;
+    }
+
+    addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
+  };
+
   const handleQuery = async (query: string, retryCount = 0) => {
     if (!query.trim() || loading) return;
     
@@ -315,35 +429,11 @@ export default function ConsolePage() {
     setLoading(true);
 
     try {
-      // Add request timeout and retry logic
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      let result: MediaQueryResult;
-      try {
-        result = await mediaApi.query(query);
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (result.type === "image") {
-        const image = result.data as MediaImage;
-        // Validate image URL is reachable
-        if (image.url) {
-          addMessage({ role: "nexus", type: "image", image });
-        } else {
-          addMessage({ role: "nexus", type: "error", text: "Image URL not available. Please try another query." });
-        }
-      } else if (result.type === "guide") {
-        const guide = result.data as MediaGuide;
-        if (guide.steps && guide.steps.length > 0) {
-          addMessage({ role: "nexus", type: "guide", guide });
-        } else {
-          addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete. Please try again." });
-        }
-      } else if (result.type === "guide_list") {
-        addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
-      }
+      const result = mediaMode === "video"
+        ? getFallbackMedia(query, "video")
+        : await mediaApi.query(query, mediaMode);
+      setOfflineMedia(false);
+      pushMediaResult(result, query);
 
       // Text response from Nexus chat (optional, non-blocking)
       try {
@@ -363,30 +453,21 @@ export default function ConsolePage() {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const fallback = getFallbackMedia(query, mediaMode);
+      setOfflineMedia(true);
+      pushMediaResult(fallback, query);
+      addMessage({
+        role: "nexus",
+        type: "text",
+        text: "I could not reach the media service, so I loaded a local wellness result instead.",
+      });
       
-      // Improve error messages
-      let userMessage = "Unable to fetch media. ";
-      if (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout") || errorMessage.includes("Aborted")) {
-        userMessage += "Connection issue. Try again.";
-      } else if (errorMessage.includes("401") || errorMessage.includes("403")) {
-        userMessage += "Authentication required.";
-      } else if (errorMessage.includes("404")) {
-        userMessage += "Content not found.";
-      } else if (errorMessage.includes("429")) {
-        userMessage += "Server busy. Wait a moment and try again.";
-      } else {
-        userMessage += "Please try a different query.";
-      }
-
-      // Retry logic for network errors
-      if (retryCount < 2 && (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout"))) {
+      if (retryCount < 1 && mediaMode !== "auto" && (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout"))) {
         addMessage({ role: "nexus", type: "text", text: "Retrying your request..." });
         setTimeout(() => handleQuery(query, retryCount + 1), 1500);
-      } else {
-        addMessage({ role: "nexus", type: "error", text: userMessage, retryQuery: query });
       }
 
-      console.error("Query error:", { error, retryCount });
+      console.warn("Media query fell back to local content.", { error, retryCount });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -397,20 +478,25 @@ export default function ConsolePage() {
     setLoading(true);
     addMessage({ role: "user", type: "text", text: `Show me the ${guideId.replace(/-/g, " ")} guide` });
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      try {
-        const guide = await mediaApi.guide(guideId, false);
-        if (guide.steps && guide.steps.length > 0) {
-          addMessage({ role: "nexus", type: "guide", guide });
-        } else {
-          addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete.", retryQuery: guideId });
-        }
-      } finally {
-        clearTimeout(timeoutId);
+      const guide = await mediaApi.guide(guideId, false);
+      setOfflineMedia(false);
+      if (guide.steps && guide.steps.length > 0) {
+        addMessage({ role: "nexus", type: "guide", guide });
+      } else {
+        addMessage({ role: "nexus", type: "error", text: "Guide data is incomplete.", retryQuery: guideId });
       }
     } catch (error) {
+      const fallbackGuide = getFallbackGuide(guideId);
+      if (fallbackGuide) {
+        setOfflineMedia(true);
+        addMessage({ role: "nexus", type: "guide", guide: fallbackGuide });
+        addMessage({
+          role: "nexus",
+          type: "text",
+          text: "I could not reach the guide service, so I opened the local guide version.",
+        });
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       addMessage({ 
         role: "nexus", 
@@ -418,16 +504,22 @@ export default function ConsolePage() {
         text: `Could not load guide. ${errorMessage.substring(0, 50)}`,
         retryQuery: guideId 
       });
-      console.error("Guide load error:", error);
+      console.warn("Guide load failed.", error);
     } finally {
       setLoading(false);
     }
   };
 
   const isBusy = loading || voice.isProcessing;
+  const modeOptions: Array<{ id: MediaMode; label: string; icon: typeof Compass }> = [
+    { id: "auto", label: "Auto", icon: Compass },
+    { id: "image", label: "Images", icon: ImageIcon },
+    { id: "video", label: "Videos", icon: Video },
+    { id: "guide", label: "Guides", icon: BookOpen },
+  ];
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-56px)] md:h-screen max-w-4xl mx-auto">
+    <div className="flex flex-col h-[calc(100dvh-56px)] md:h-screen max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-white/5 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -443,6 +535,10 @@ export default function ConsolePage() {
           {dalleAvailable ? (
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">
               <Zap className="w-3 h-3" /> DALL·E 3
+            </span>
+          ) : offlineMedia ? (
+            <span className="flex items-center gap-1.5 text-xs text-amber-300 bg-amber-400/10 px-2 py-1 rounded-full">
+              <WifiOff className="w-3 h-3" /> Local media
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-xs text-white/30 bg-white/5 px-2 py-1 rounded-full">
@@ -466,8 +562,39 @@ export default function ConsolePage() {
         ))}
       </div>
 
+      <div className="flex items-center justify-between gap-3 px-4 pb-3 border-b border-white/5 flex-shrink-0">
+        <div className="flex gap-1 rounded-2xl bg-white/[0.04] border border-white/10 p-1">
+          {modeOptions.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                key={option.id}
+                onClick={() => setMediaMode(option.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-all",
+                  mediaMode === option.id
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-white/45 hover:text-white hover:bg-white/10",
+                )}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => addMessage({ role: "nexus", type: "guide_list", guideList: fallbackGuideList() })}
+          className="hidden sm:flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/55 hover:text-white hover:bg-white/10 transition-all"
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          Browse guides
+        </button>
+      </div>
+
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-5 min-h-0">
+      <div className="flex-1 min-h-0 grid lg:grid-cols-[1fr_260px]">
+      <div className="overflow-y-auto px-4 py-2 space-y-5 min-h-0">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -511,6 +638,7 @@ export default function ConsolePage() {
                 </div>
               )}
               {msg.type === "image" && msg.image && <ImageCard image={msg.image} />}
+              {msg.type === "video" && msg.video && <VideoCard video={msg.video} />}
               {msg.type === "guide" && msg.guide && <GuideCard guide={msg.guide} />}
               {msg.type === "guide_list" && msg.guideList && (
                 <GuideListCard guides={msg.guideList} onSelect={loadGuide} />
@@ -534,6 +662,38 @@ export default function ConsolePage() {
           </div>
         )}
         <div ref={bottomRef} className="h-2" />
+      </div>
+
+      <aside className="hidden lg:block border-l border-white/5 px-4 py-4 overflow-y-auto">
+        <div className="space-y-5">
+          <div>
+            <p className="text-white/35 text-xs uppercase tracking-wider mb-3">Video picks</p>
+            <div className="space-y-2">
+              {fallbackVideos.map((video) => (
+                <button
+                  key={video.id}
+                  onClick={() => {
+                    addMessage({ role: "user", type: "text", text: video.title });
+                    addMessage({ role: "nexus", type: "video", video });
+                  }}
+                  className="w-full text-left rounded-xl border border-white/10 bg-white/[0.04] p-3 hover:bg-white/10 hover:border-sky-400/30 transition-all"
+                >
+                  <div className="flex items-center gap-2 text-sky-300 text-xs font-medium">
+                    <Video className="w-3.5 h-3.5" />
+                    {video.duration}
+                  </div>
+                  <p className="mt-1 text-white/80 text-sm font-medium">{video.title}</p>
+                  <p className="mt-1 text-white/35 text-xs line-clamp-2">{video.description}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-white/35 text-xs uppercase tracking-wider mb-3">Guide library</p>
+            <GuideListCard guides={fallbackGuideList()} onSelect={loadGuide} />
+          </div>
+        </div>
+      </aside>
       </div>
 
       {/* Input bar */}
