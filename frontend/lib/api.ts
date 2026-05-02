@@ -266,6 +266,13 @@ export interface MeditationGuide {
   level: string;
   tags: string[];
   audio_url: string | null;
+  background_music?: string | null;
+  voice_guidance?: {
+    speaker?: string;
+    style?: string;
+    total_duration_seconds?: number;
+    segments?: { time: number; text: string; duration?: number }[];
+  } | null;
   thumbnail_url: string | null;
   script?: string[];
 }
