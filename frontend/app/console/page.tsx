@@ -400,7 +400,18 @@ export default function ConsolePage() {
     ]);
   };
 
-  const pushMediaResult = (result: MediaQueryResult, query: string) => {
+  const speakText = (text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const pushMediaResult = (result: MediaQueryResult, query: string): string => {
     if (result.type === "image") {
       const image = result.data as MediaImage;
       addMessage(
@@ -408,12 +419,13 @@ export default function ConsolePage() {
           ? { role: "nexus", type: "image", image }
           : { role: "nexus", type: "error", text: "Image URL not available. Please try another query.", retryQuery: query },
       );
-      return;
+      return image.url ? `Here is an image for ${query}.` : "I could not load that image.";
     }
 
     if (result.type === "video") {
-      addMessage({ role: "nexus", type: "video", video: result.data as MediaVideo });
-      return;
+      const video = result.data as MediaVideo;
+      addMessage({ role: "nexus", type: "video", video });
+      return `I found a video for you: ${video.title}.`;
     }
 
     if (result.type === "guide") {
@@ -423,10 +435,13 @@ export default function ConsolePage() {
           ? { role: "nexus", type: "guide", guide }
           : { role: "nexus", type: "error", text: "Guide data is incomplete. Please try again.", retryQuery: query },
       );
-      return;
+      return guide.steps?.length
+        ? `Here is the ${guide.title} guide with ${guide.total_steps} steps.`
+        : "I could not load that guide.";
     }
 
     addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
+    return "Here are the available visual wellness guides.";
   };
 
   const handleQuery = async (query: string, retryCount = 0, via: "text" | "voice" = "text") => {
@@ -441,7 +456,8 @@ export default function ConsolePage() {
         ? getFallbackMedia(query, "video")
         : await mediaApi.query(query, mediaMode);
       setOfflineMedia(false);
-      pushMediaResult(result, query);
+      const mediaSummary = pushMediaResult(result, query);
+      let spokeResponse = false;
 
       // Text response from Nexus chat (optional, non-blocking)
       try {
@@ -451,6 +467,10 @@ export default function ConsolePage() {
           const chat: NexusChatResponse = await nexus.chat(query);
           if (chat.response) {
             addMessage({ role: "nexus", type: "text", text: chat.response, via });
+            if (via === "voice") {
+              speakText(chat.response);
+              spokeResponse = true;
+            }
           }
         } finally {
           clearTimeout(chatTimeoutId);
@@ -459,16 +479,17 @@ export default function ConsolePage() {
         // Chat is optional, fail silently
         console.debug("Chat response skipped:", chatErr);
       }
+      if (via === "voice" && !spokeResponse) {
+        speakText(mediaSummary);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       const fallback = getFallbackMedia(query, mediaMode);
       setOfflineMedia(true);
-      pushMediaResult(fallback, query);
-      addMessage({
-        role: "nexus",
-        type: "text",
-        text: "I could not reach the media service, so I loaded a local wellness result instead.",
-      });
+      const spoken = pushMediaResult(fallback, query);
+      if (via === "voice") {
+        speakText(spoken);
+      }
       
       if (retryCount < 1 && mediaMode !== "auto" && (errorMessage.includes("Failed to fetch") || errorMessage.includes("timeout"))) {
         addMessage({ role: "nexus", type: "text", text: "Retrying your request..." });
