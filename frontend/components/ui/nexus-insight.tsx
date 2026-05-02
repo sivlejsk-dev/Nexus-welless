@@ -70,10 +70,13 @@ export function NexusInsight({
 
   return (
     <div className={cn("glass-card overflow-hidden", className)}>
-      {/* Header */}
-      <button
+      {/* Header — div not button to avoid nested-button hydration error */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setCollapsed((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/3 transition-colors"
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setCollapsed((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/3 transition-colors cursor-pointer select-none"
       >
         <div className="flex items-center gap-3">
           <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0", accentClass)}>
@@ -99,7 +102,7 @@ export function NexusInsight({
             : <ChevronUp className="w-4 h-4 text-white/30" />
           }
         </div>
-      </button>
+      </div>
 
       {!collapsed && (
         <div className="px-5 pb-5 space-y-4 border-t border-white/5">
