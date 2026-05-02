@@ -1,6 +1,7 @@
 /**
  * Typed API client for the Nexus Wellness backend.
  * All requests include the JWT from localStorage when available.
+ * On 401, the access token is silently refreshed once and the request retried.
  */
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -11,9 +12,54 @@ function getToken(): string | null {
   return localStorage.getItem("nexus_access_token");
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("nexus_refresh_token");
+}
+
+function setTokens(access: string, refresh: string): void {
+  localStorage.setItem("nexus_access_token", access);
+  localStorage.setItem("nexus_refresh_token", refresh);
+}
+
+function clearTokens(): void {
+  localStorage.removeItem("nexus_access_token");
+  localStorage.removeItem("nexus_refresh_token");
+}
+
+// Prevent concurrent refresh races — one in-flight refresh shared by all callers.
+let _refreshPromise: Promise<string | null> | null = null;
+
+async function _doRefresh(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(`${API}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) { clearTokens(); return null; }
+    const data = await res.json();
+    setTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  } catch {
+    clearTokens();
+    return null;
+  }
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = _doRefresh().finally(() => { _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
+
 async function request<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  _retry = true,
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -23,7 +69,7 @@ async function request<T>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), 90_000);
 
   try {
     const res = await fetch(`${API}${path}`, {
@@ -31,6 +77,18 @@ async function request<T>(
       headers,
       signal: controller.signal,
     });
+
+    // On 401, attempt a silent token refresh then retry once.
+    if (res.status === 401 && _retry) {
+      clearTimeout(timeout);
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return request<T>(path, options, false);
+      }
+      // Refresh failed — redirect to login.
+      if (typeof window !== "undefined") window.location.href = "/login";
+      throw new Error("Session expired. Please log in again.");
+    }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
@@ -132,17 +190,59 @@ export const detox = {
 };
 
 // ── Nexus AI ──────────────────────────────────────────────────────────────────
+export interface NexusSession {
+  session_id: string;
+  primary_domain: string | null;
+  total_turns: number;
+  active_turns: number;
+  has_summary: boolean;
+  summary_preview: string | null;
+  created_at: string;
+  last_active: string;
+}
+
+export interface NexusTurn {
+  turn_index: number;
+  role: "user" | "assistant";
+  content: string;
+  domain: string | null;
+  intent: string | null;
+  created_at: string;
+}
+
+export interface NexusSessionDetail extends NexusSession {
+  summary: string | null;
+  turns: NexusTurn[];
+}
+
 export const nexus = {
   recommend: (module: string, context: Record<string, unknown> = {}, user_message?: string) =>
     request<NexusResponse>("/nexus/recommend", {
       method: "POST",
       body: JSON.stringify({ module, context, user_message }),
     }),
-  chat: (message: string) =>
+
+  chat: (message: string, module?: string) =>
     request<NexusChatResponse>("/nexus/chat", {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message: module ? `[${module}] ${message}` : message }),
     }),
+
+  /** List the current user's conversation sessions, most recent first. */
+  listSessions: (limit = 20) =>
+    request<{ sessions: NexusSession[]; count: number }>(`/nexus/sessions?limit=${limit}`),
+
+  /** Fetch full turn history for a specific session. */
+  getSession: (sessionId: string) =>
+    request<NexusSessionDetail>(`/nexus/sessions/${sessionId}`),
+
+  /** Delete a specific session. */
+  deleteSession: (sessionId: string) =>
+    request<{ deleted: boolean }>(`/nexus/sessions/${sessionId}`, { method: "DELETE" }),
+
+  /** Clear the active in-memory conversation context. */
+  clearSession: () =>
+    request<{ cleared: boolean }>("/nexus/session", { method: "DELETE" }),
 };
 
 // ── Media / Console ───────────────────────────────────────────────────────────
@@ -244,6 +344,39 @@ export async function transcribeAudio(
 export async function getVoiceConfig(): Promise<VoiceConfig> {
   return request<VoiceConfig>("/voice/config");
 }
+
+/** Namespaced voice helpers used by useVoice. */
+export const voice = {
+  /**
+   * Synthesise text to speech.
+   * Calls POST /voice/synthesise which returns raw MP3 bytes.
+   * Converts to base64 so it can be played via an Audio element.
+   * Returns null on any failure (TTS is non-critical).
+   */
+  async synthesise(text: string, voiceName = "nova"): Promise<string | null> {
+    const token = getToken();
+    const form = new FormData();
+    form.append("text", text.slice(0, 4096));
+    form.append("voice", voiceName);
+
+    try {
+      const res = await fetch(`${API}/voice/synthesise`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      if (!res.ok) return null;
+      const arrayBuf = await res.arrayBuffer();
+      // Convert binary MP3 to base64 for Audio element playback
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    } catch {
+      return null;
+    }
+  },
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface User {

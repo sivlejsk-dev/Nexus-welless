@@ -30,19 +30,25 @@ def _create_token(subject: str, expires_delta: timedelta, extra: dict[str, Any] 
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, extra: dict[str, Any] | None = None) -> str:
+    payload = {"type": "access"}
+    if extra:
+        payload.update(extra)
     return _create_token(
         subject=user_id,
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-        extra={"type": "access"},
+        extra=payload,
     )
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(user_id: str, extra: dict[str, Any] | None = None) -> str:
+    payload = {"type": "refresh"}
+    if extra:
+        payload.update(extra)
     return _create_token(
         subject=user_id,
         expires_delta=timedelta(days=settings.refresh_token_expire_days),
-        extra={"type": "refresh"},
+        extra=payload,
     )
 
 

@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { voiceChat, VoiceChatResponse } from "./api";
+import { voiceChat, nexus, voice as voiceApi, VoiceChatResponse } from "./api";
 
 type BrowserSpeechRecognition = {
   continuous: boolean;
@@ -226,32 +226,46 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
           { role: "user", text: transcript, timestamp: new Date() },
         ]);
 
-        // Send transcript through the Nexus voice-chat pipeline so the caller
-        // receives a response (same as the MediaRecorder path).
+        // Browser STT gave us clean text — send directly to /nexus/chat,
+        // bypassing Whisper entirely (no fake audio blob).
         transition("processing");
         try {
-          // Encode the transcript as a tiny blob so the server endpoint accepts it.
-          // The server will re-transcribe it via Whisper; the text is what matters.
-          const enc = new TextEncoder();
-          const bytes = enc.encode(transcript);
-          const blob = new Blob([bytes], { type: "audio/webm" });
-          const result = await voiceChat(blob, { voice, ttsEnabled, language });
-
+          const chatRes = await nexus.chat(transcript);
           if (cancelledRef.current) { transition("idle"); return; }
+
+          const responseText = chatRes.response;
+
+          // Attempt server TTS; fall back to browser synthesis on failure.
+          let audio_b64: string | null = null;
+          if (ttsEnabled) {
+            try {
+              audio_b64 = await voiceApi.synthesise(responseText, voice);
+            } catch { /* non-fatal */ }
+          }
+
+          const syntheticResult: VoiceChatResponse = {
+            transcript,
+            response_text: responseText,
+            audio_b64,
+            domain: "general",
+            intent: "chat",
+            session_id: null,
+            tts_available: audio_b64 !== null,
+          };
 
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", text: result.response_text, timestamp: new Date() },
+            { role: "assistant", text: responseText, timestamp: new Date() },
           ]);
-          onResponse?.(result);
+          onResponse?.(syntheticResult);
 
           transition("speaking");
-          if (result.audio_b64) {
-            try { await playBase64Audio(result.audio_b64); } catch {
-              if (ttsEnabled) await speakWithBrowser(result.response_text);
+          if (audio_b64) {
+            try { await playBase64Audio(audio_b64); } catch {
+              if (ttsEnabled && browserTTSSupported) await speakWithBrowser(responseText);
             }
           } else if (ttsEnabled && browserTTSSupported) {
-            await speakWithBrowser(result.response_text);
+            await speakWithBrowser(responseText);
           }
           if (!cancelledRef.current) transition("idle");
         } catch (err) {
