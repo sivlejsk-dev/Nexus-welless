@@ -1,0 +1,13 @@
+services:
+  backend:
+    name: Backend (FastAPI)
+    description: Nexus FastAPI backend on port 8000
+    commands:
+      start: cd /workspaces/workspaces/backend && source venv/bin/activate 2>/dev/null || true && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+      ready: curl -sf http://localhost:8000/health
+  frontend:
+    name: Frontend (Next.js)
+    description: Nexus Next.js frontend on port 3000
+    commands:
+      start: cd /workspaces/workspaces/frontend && npm run dev -- --port 3000
+      ready: curl -sf http://localhost:3000
