@@ -199,7 +199,7 @@ export async function voiceChat(
   if (opts.language) form.append("language", opts.language);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
     const res = await fetch(`${API}/voice/chat`, {

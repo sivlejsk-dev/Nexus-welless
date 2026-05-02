@@ -17,6 +17,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { voiceChat, VoiceChatResponse } from "./api";
 
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error?: string; message?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type WindowWithSpeechRecognition = Window & typeof globalThis & {
+  webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+  SpeechRecognition?: new () => BrowserSpeechRecognition;
+};
+
 export type VoiceState = "idle" | "recording" | "processing" | "speaking" | "error";
 
 export interface VoiceMessage {
@@ -71,10 +88,12 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speechSynthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const browserTranscriptRef = useRef("");
   const cancelledRef = useRef(false);
 
   const browserSTTSupported =
-    typeof window !== "undefined" && "webkitSpeechRecognition" in window;
+    typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
   const browserTTSSupported =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -92,8 +111,8 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
     return () => {
       stopStream();
       stopAudio();
+      recognitionRef.current?.abort();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -125,7 +144,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
   }
 
   // ── Browser TTS fallback ─────────────────────────────────────────────────────
-  function speakWithBrowser(text: string): Promise<void> {
+  const speakWithBrowser = useCallback((text: string): Promise<void> => {
     return new Promise((resolve) => {
       if (!browserTTSSupported) {
         resolve();
@@ -148,7 +167,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
       speechSynthRef.current = utt;
       window.speechSynthesis.speak(utt);
     });
-  }
+  }, [browserTTSSupported]);
 
   // ── Start recording ──────────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
@@ -158,10 +177,72 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
     cancelledRef.current = false;
     stopAudio();
 
+    const SpeechRecognitionCtor = typeof window !== "undefined"
+      ? (window as WindowWithSpeechRecognition).SpeechRecognition ?? (window as WindowWithSpeechRecognition).webkitSpeechRecognition
+      : undefined;
+
+    if (SpeechRecognitionCtor) {
+      browserTranscriptRef.current = "";
+      const recognition = new SpeechRecognitionCtor();
+      recognitionRef.current = recognition;
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = language ?? "en-US";
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map((result) => result[0]?.transcript ?? "")
+          .join(" ")
+          .trim();
+        browserTranscriptRef.current = transcript;
+      };
+
+      recognition.onerror = (event) => {
+        if (cancelledRef.current || event.error === "aborted") {
+          transition("idle");
+          return;
+        }
+        const msg = event.message || event.error || "Browser speech recognition failed";
+        setError(msg);
+        transition("error");
+        onError?.(new Error(msg));
+      };
+
+      recognition.onend = () => {
+        const transcript = browserTranscriptRef.current.trim();
+        recognitionRef.current = null;
+        if (cancelledRef.current) {
+          transition("idle");
+          return;
+        }
+        if (!transcript) {
+          transition("idle");
+          return;
+        }
+        onTranscript?.(transcript);
+        setMessages((prev) => [
+          ...prev,
+          { role: "user", text: transcript, timestamp: new Date() },
+        ]);
+        transition("idle");
+      };
+
+      try {
+        recognition.start();
+        transition("recording");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not start browser speech recognition";
+        setError(msg);
+        transition("error");
+        onError?.(new Error(msg));
+      }
+      return;
+    }
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch (err) {
+    } catch {
       const msg = "Microphone access denied. Please allow microphone access and try again.";
       setError(msg);
       transition("error");
@@ -250,6 +331,10 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
         if (!cancelledRef.current) transition("idle");
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Voice chat failed";
+        if (cancelledRef.current || msg.includes("signal is aborted") || msg.includes("AbortError")) {
+          transition("idle");
+          return;
+        }
         setError(msg);
         transition("error");
         onError?.(err instanceof Error ? err : new Error(msg));
@@ -258,10 +343,14 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
 
     recorder.start(250); // collect chunks every 250 ms
     transition("recording");
-  }, [state, voice, ttsEnabled, language, transition, onTranscript, onResponse, onError, browserTTSSupported]);
+  }, [state, voice, ttsEnabled, language, transition, onTranscript, onResponse, onError, browserTTSSupported, speakWithBrowser]);
 
   // ── Stop recording (send to server) ─────────────────────────────────────────
   const stopRecording = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }
@@ -270,6 +359,8 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
   // ── Cancel recording (discard audio) ────────────────────────────────────────
   const cancelRecording = useCallback(() => {
     cancelledRef.current = true;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
     if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
     }

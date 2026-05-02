@@ -351,6 +351,7 @@ export default function ConsolePage() {
   const [dalleAvailable, setDalleAvailable] = useState(false);
   const [offlineMedia, setOfflineMedia] = useState(false);
   const [mediaMode, setMediaMode] = useState<MediaMode>("auto");
+  const [voiceQuery, setVoiceQuery] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -359,13 +360,20 @@ export default function ConsolePage() {
     voice: "nova",
     ttsEnabled: true,
     onTranscript: (text) => {
-      addMessage({ role: "user", type: "text", text, via: "voice" });
+      setVoiceQuery(text);
     },
     onResponse: (r) => {
       addMessage({ role: "nexus", type: "text", text: r.response_text, via: "voice" });
     },
     onError: (err) => {
-      addMessage({ role: "nexus", type: "error", text: `Voice error: ${err.message}` });
+      const aborted = err.message.includes("signal is aborted") || err.name === "AbortError";
+      addMessage({
+        role: "nexus",
+        type: aborted ? "text" : "error",
+        text: aborted
+          ? "Voice capture was interrupted. Please try speaking again, or type your question below."
+          : `Voice error: ${err.message}`,
+      });
     },
   });
 
@@ -421,11 +429,11 @@ export default function ConsolePage() {
     addMessage({ role: "nexus", type: "guide_list", guideList: result.data as MediaGuideInfo[] });
   };
 
-  const handleQuery = async (query: string, retryCount = 0) => {
+  const handleQuery = async (query: string, retryCount = 0, via: "text" | "voice" = "text") => {
     if (!query.trim() || loading) return;
     
     setInput("");
-    addMessage({ role: "user", type: "text", text: query, via: "text" });
+    addMessage({ role: "user", type: "text", text: query, via });
     setLoading(true);
 
     try {
@@ -442,7 +450,7 @@ export default function ConsolePage() {
         try {
           const chat: NexusChatResponse = await nexus.chat(query);
           if (chat.response) {
-            addMessage({ role: "nexus", type: "text", text: chat.response, via: "text" });
+            addMessage({ role: "nexus", type: "text", text: chat.response, via });
           }
         } finally {
           clearTimeout(chatTimeoutId);
@@ -473,6 +481,16 @@ export default function ConsolePage() {
       inputRef.current?.focus();
     }
   };
+
+  useEffect(() => {
+    if (!voiceQuery) {
+      return;
+    }
+    void handleQuery(voiceQuery, 0, "voice");
+    queueMicrotask(() => setVoiceQuery(null));
+    // handleQuery intentionally reads the latest console state when the transcript arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceQuery]);
 
   const loadGuide = async (guideId: string) => {
     setLoading(true);
