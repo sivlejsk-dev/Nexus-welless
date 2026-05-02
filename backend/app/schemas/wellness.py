@@ -45,6 +45,7 @@ class MeditationGuide(BaseModel):
     background_music: str | None = None
     voice_guidance: dict[str, Any] | None = None
     thumbnail_url: str | None = None
+    script: list[str] | None = None
 
 
 class MeditationSessionCreate(BaseModel):

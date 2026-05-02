@@ -20,7 +20,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "beginner",
         "tags": ["anxiety", "quick", "stress-relief", "focus"],
         "thumbnail_url": "/images/meditation/breathwork-box.jpg",
-        "background_music": "/audio/music/ambient-calm-180bpm.mp3",
+        "background_music": "/audio/music/ambient-calm-180bpm.wav",
         "voice_guidance": {
             "speaker": "Sofia - Warm, Soothing Female",
             "style": "gentle, encouraging",
@@ -76,7 +76,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "intermediate",
         "tags": ["stress-relief", "sleep-prep", "anxiety", "nervous-system"],
         "thumbnail_url": "/images/meditation/breathwork-478.jpg",
-        "background_music": "/audio/music/ambient-deep-sleep-120bpm.mp3",
+        "background_music": "/audio/music/ambient-deep-sleep-120bpm.wav",
         "voice_guidance": {
             "speaker": "Marcus - Deep, Calming Male",
             "style": "measured, professional, grounding",
@@ -136,7 +136,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "advanced",
         "tags": ["heart-coherence", "nervous-system", "biohacking", "advanced"],
         "thumbnail_url": "/images/meditation/breathwork-resonance.jpg",
-        "background_music": "/audio/music/binaural-coherence-60bpm.mp3",
+        "background_music": "/audio/music/binaural-coherence-60bpm.wav",
         "voice_guidance": {
             "speaker": "Dr. Elena - Expert, Clear, Informative",
             "style": "scientific, precise, empowering",
@@ -183,7 +183,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "beginner",
         "tags": ["quick", "relaxation", "awareness", "beginners"],
         "thumbnail_url": "/images/meditation/bodyscan-quick.jpg",
-        "background_music": "/audio/music/soft-piano-ambient-80bpm.mp3",
+        "background_music": "/audio/music/soft-piano-ambient-80bpm.wav",
         "voice_guidance": {
             "speaker": "Aria - Gentle, Nurturing Female",
             "style": "warm, inviting, reassuring",
@@ -240,7 +240,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "intermediate",
         "tags": ["relaxation", "healing", "sleep-prep", "detailed"],
         "thumbnail_url": "/images/meditation/bodyscan-deep.jpg",
-        "background_music": "/audio/music/theta-waves-60bpm.mp3",
+        "background_music": "/audio/music/theta-waves-60bpm.wav",
         "voice_guidance": {
             "speaker": "James - Calm, Authoritative Male",
             "style": "structured, detailed, grounding",
@@ -313,7 +313,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "advanced",
         "tags": ["sleep", "deep-rest", "subconscious", "advanced-healing"],
         "thumbnail_url": "/images/meditation/yoga-nidra.jpg",
-        "background_music": "/audio/music/delta-waves-50bpm.mp3",
+        "background_music": "/audio/music/delta-waves-50bpm.wav",
         "voice_guidance": {
             "speaker": "Swami - Traditional, Authoritative, Deeply Soothing",
             "style": "yogic, mystical, transformative",
@@ -389,7 +389,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "beginner",
         "tags": ["morning", "intention", "focus", "energy"],
         "thumbnail_url": "/images/meditation/morning-intention.jpg",
-        "background_music": "/audio/music/uplifting-morning-100bpm.mp3",
+        "background_music": "/audio/music/uplifting-morning-100bpm.wav",
         "voice_guidance": {
             "speaker": "Luna - Bright, Energetic Female",
             "style": "inspiring, clear, empowering",
@@ -438,7 +438,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "intermediate",
         "tags": ["chakras", "energy", "healing", "spiritual"],
         "thumbnail_url": "/images/meditation/chakras.jpg",
-        "background_music": "/audio/music/binaural-chakra-healing-100bpm.mp3",
+        "background_music": "/audio/music/binaural-chakra-healing-100bpm.wav",
         "voice_guidance": {
             "speaker": "Indra - Mystical, Experienced Female",
             "style": "spiritual, poetic, visionary",
@@ -512,7 +512,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "advanced",
         "tags": ["manifestation", "life-design", "advanced", "transformation"],
         "thumbnail_url": "/images/meditation/future-self.jpg",
-        "background_music": "/audio/music/expansive-vision-80bpm.mp3",
+        "background_music": "/audio/music/expansive-vision-80bpm.wav",
         "voice_guidance": {
             "speaker": "Oracle - Deep, Wise, Transformative",
             "style": "visionary, profound, empowering",
@@ -584,7 +584,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "beginner",
         "tags": ["mantra", "sacred-sound", "beginner", "universal"],
         "thumbnail_url": "/images/meditation/om-mantra.jpg",
-        "background_music": "/audio/music/om-frequency-108hz.mp3",
+        "background_music": "/audio/music/om-frequency-108hz.wav",
         "voice_guidance": {
             "speaker": "Vedic Scholar - Authentic Sanskrit",
             "style": "traditional, reverent, clear",
@@ -644,7 +644,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "intermediate",
         "tags": ["compassion", "mantra", "heart-opening", "emotional-healing"],
         "thumbnail_url": "/images/meditation/metta-mantra.jpg",
-        "background_music": "/audio/music/heart-chakra-binaural-100hz.mp3",
+        "background_music": "/audio/music/heart-chakra-binaural-100hz.wav",
         "voice_guidance": {
             "speaker": "Bhikkhu - Buddhist Monk, Warm and Wise",
             "style": "compassionate, ancient, gentle",
@@ -708,7 +708,7 @@ MEDITATION_GUIDES: list[dict[str, Any]] = [
         "level": "advanced",
         "tags": ["self-inquiry", "mantra", "non-dual", "advanced-spiritual"],
         "thumbnail_url": "/images/meditation/so-hum-mantra.jpg",
-        "background_music": "/audio/music/monochord-heart-chakra-80hz.mp3",
+        "background_music": "/audio/music/monochord-heart-chakra-80hz.wav",
         "voice_guidance": {
             "speaker": "Advaita Master - Ancient, Transcendent",
             "style": "non-dual, profoundly deep, liberating",
