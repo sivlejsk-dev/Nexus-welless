@@ -8,13 +8,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { nexus } from "@/lib/api";
-import { Sparkles, X, Send, Mic, MicOff } from "lucide-react";
+import { EyeOff, Grip, Mic, MicOff, Send, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatMessage {
   id: string;
   role: "user" | "nexus";
   text: string;
+}
+
+const FAB_SIZE = 56;
+const FAB_STORAGE_KEY = "nexus_fab_position";
+const FAB_HIDDEN_KEY = "nexus_fab_hidden";
+const FAB_VISIBILITY_EVENT = "nexus-fab-visibility";
+
+interface FabPosition {
+  x: number;
+  y: number;
 }
 
 // Map pathnames to a context label Nexus uses to stay on-topic
@@ -32,16 +42,85 @@ function contextFromPath(path: string): string {
 export function NexusFab() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const [position, setPosition] = useState<FabPosition>({ x: 0, y: 0 });
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
 
   const context = contextFromPath(pathname);
+
+  const clampPosition = useCallback((next: FabPosition, size = viewport) => {
+    const width = size.width || window.innerWidth;
+    const height = size.height || window.innerHeight;
+    return {
+      x: Math.min(Math.max(8, next.x), Math.max(8, width - FAB_SIZE - 8)),
+      y: Math.min(Math.max(8, next.y), Math.max(8, height - FAB_SIZE - 8)),
+    };
+  }, [viewport]);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      const nextViewport = { width: window.innerWidth, height: window.innerHeight };
+      setViewport(nextViewport);
+      setPosition((current) => {
+        const defaultPosition = {
+          x: nextViewport.width - FAB_SIZE - (nextViewport.width >= 768 ? 24 : 16),
+          y: nextViewport.height - FAB_SIZE - (nextViewport.width >= 768 ? 24 : 80),
+        };
+        const next = current.x === 0 && current.y === 0 ? defaultPosition : current;
+        return {
+          x: Math.min(Math.max(8, next.x), Math.max(8, nextViewport.width - FAB_SIZE - 8)),
+          y: Math.min(Math.max(8, next.y), Math.max(8, nextViewport.height - FAB_SIZE - 8)),
+        };
+      });
+    };
+
+    const storedPosition = localStorage.getItem(FAB_STORAGE_KEY);
+    const storedHidden = localStorage.getItem(FAB_HIDDEN_KEY) === "true";
+    setHidden(storedHidden);
+    if (storedPosition) {
+      try {
+        const parsed = JSON.parse(storedPosition) as FabPosition;
+        if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+          setPosition(parsed);
+        }
+      } catch {
+        localStorage.removeItem(FAB_STORAGE_KEY);
+      }
+    }
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    window.addEventListener(FAB_VISIBILITY_EVENT, updateViewport);
+    const onVisibility = () => setHidden(localStorage.getItem(FAB_HIDDEN_KEY) === "true");
+    window.addEventListener(FAB_VISIBILITY_EVENT, onVisibility);
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+      window.removeEventListener(FAB_VISIBILITY_EVENT, updateViewport);
+      window.removeEventListener(FAB_VISIBILITY_EVENT, onVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (position.x || position.y) {
+      localStorage.setItem(FAB_STORAGE_KEY, JSON.stringify(position));
+    }
+  }, [position]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -108,15 +187,70 @@ export function NexusFab() {
     setListening(true);
   }, [listening, send]);
 
+  const hideFab = useCallback(() => {
+    setOpen(false);
+    setHidden(true);
+    localStorage.setItem(FAB_HIDDEN_KEY, "true");
+    window.dispatchEvent(new Event(FAB_VISIBILITY_EVENT));
+  }, []);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: position.x,
+      originY: position.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [position]);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    setPosition(clampPosition({ x: drag.originX + deltaX, y: drag.originY + deltaY }));
+  }, [clampPosition]);
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    if (!drag.moved) setOpen((v) => !v);
+  }, []);
+
   // Don't show on login page
   if (pathname === "/login") return null;
+  if (hidden) return null;
+
+  const panelWidth = Math.min(360, Math.max(280, viewport.width - 32));
+  const panelHeight = Math.min(520, Math.max(360, viewport.height * 0.7));
+  const panelLeft = Math.min(
+    Math.max(16, position.x + FAB_SIZE / 2 - panelWidth / 2),
+    Math.max(16, viewport.width - panelWidth - 16),
+  );
+  const panelTop = position.y > viewport.height / 2
+    ? Math.max(16, position.y - panelHeight - 12)
+    : Math.min(Math.max(16, position.y + FAB_SIZE + 12), Math.max(16, viewport.height - panelHeight - 16));
 
   return (
     <>
       {/* Overlay panel */}
       {open && (
-        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-6 z-50 w-[min(360px,calc(100vw-2rem))] flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/10"
-          style={{ background: "rgba(10,10,20,0.96)", backdropFilter: "blur(24px)", maxHeight: "min(520px, 70dvh)" }}>
+        <div className="fixed z-50 flex flex-col rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/10"
+          style={{
+            background: "rgba(10,10,20,0.96)",
+            backdropFilter: "blur(24px)",
+            left: panelLeft,
+            top: panelTop,
+            width: panelWidth,
+            maxHeight: panelHeight,
+          }}>
 
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/8 flex-shrink-0">
@@ -129,9 +263,14 @@ export function NexusFab() {
                 <p className="text-white/35 text-[10px] mt-0.5 capitalize">{context} assistant</p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="p-1.5 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-all">
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={hideFab} title="Hide floating Nexus" className="p-1.5 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-all">
+                <EyeOff className="w-4 h-4" />
+              </button>
+              <button onClick={() => setOpen(false)} title="Close Nexus chat" className="p-1.5 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/5 transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -203,16 +342,22 @@ export function NexusFab() {
 
       {/* FAB button */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={() => { dragRef.current = null; }}
         className={cn(
-          "fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50",
+          "fixed z-50",
           "w-14 h-14 rounded-2xl shadow-xl transition-all duration-300 active:scale-95",
           "flex items-center justify-center",
           open
             ? "bg-white/10 border border-white/20 text-white/60 rotate-12"
-            : "bg-gradient-to-br from-violet-600 to-indigo-600 shadow-violet-500/40 hover:shadow-violet-500/60 hover:scale-105"
+            : "bg-gradient-to-br from-violet-600 to-indigo-600 shadow-violet-500/40 hover:shadow-violet-500/60 hover:scale-105",
+          dragRef.current?.moved ? "cursor-grabbing" : "cursor-grab"
         )}
+        style={{ left: position.x, top: position.y, touchAction: "none" }}
         aria-label="Open Nexus assistant"
+        title="Drag to move Nexus"
       >
         {open
           ? <X className="w-5 h-5 text-white/70" />
@@ -220,6 +365,9 @@ export function NexusFab() {
         }
         {!open && (
           <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 border-2 border-[#07070f] animate-pulse" />
+        )}
+        {!open && (
+          <Grip className="absolute -bottom-1 -left-1 w-3.5 h-3.5 text-white/50" />
         )}
       </button>
     </>
