@@ -282,7 +282,7 @@ export const meatSubs = {
 /** Upload audio blob and get back transcript + Nexus response + optional MP3. */
 export async function voiceChat(
   audioBlob: Blob,
-  opts: { voice?: string; ttsEnabled?: boolean; language?: string } = {}
+  opts: { voice?: string; voiceSpeed?: number; ttsEnabled?: boolean; language?: string } = {}
 ): Promise<VoiceChatResponse> {
   const token = getToken();
 
@@ -294,7 +294,8 @@ export async function voiceChat(
 
   const form = new FormData();
   form.append("audio", audioBlob, filename);
-  form.append("voice", opts.voice ?? "nova");
+  form.append("voice", opts.voice ?? "shimmer");
+  form.append("speed", String(opts.voiceSpeed ?? 0.88));
   form.append("tts_enabled", (opts.ttsEnabled ?? true).toString());
   if (opts.language) form.append("language", opts.language);
 
@@ -353,11 +354,12 @@ export const voice = {
    * Converts to base64 so it can be played via an Audio element.
    * Returns null on any failure (TTS is non-critical).
    */
-  async synthesise(text: string, voiceName = "nova"): Promise<string | null> {
+  async synthesise(text: string, voiceName = "shimmer", speed = 0.88): Promise<string | null> {
     const token = getToken();
     const form = new FormData();
     form.append("text", text.slice(0, 4096));
     form.append("voice", voiceName);
+    form.append("speed", String(speed));
 
     try {
       const res = await fetch(`${API}/voice/synthesise`, {
@@ -578,6 +580,7 @@ export interface VoiceConfig {
   tts_available: boolean;
   available_voices: string[];
   default_voice: string;
+  default_speed?: number;
   supported_formats: string[];
   max_audio_mb: number;
 }

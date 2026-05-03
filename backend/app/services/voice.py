@@ -33,7 +33,9 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 # TTS voice options (OpenAI-compatible): alloy, echo, fable, onyx, nova, shimmer
-DEFAULT_VOICE = "nova"
+# Shimmer at a slightly slower pace gives Nexus the calmest default presence.
+DEFAULT_VOICE = "shimmer"
+DEFAULT_VOICE_SPEED = 0.88
 DEFAULT_TTS_MODEL = "tts-1"
 DEFAULT_STT_MODEL = "whisper-1"
 # Groq uses a different model name for Whisper
@@ -191,6 +193,7 @@ class VoiceService:
         user_id: str,
         user_profile: dict[str, Any] | None = None,
         voice: str = DEFAULT_VOICE,
+        speed: float = DEFAULT_VOICE_SPEED,
         tts_enabled: bool = True,
         db: Any | None = None,
     ) -> dict[str, Any]:
@@ -239,7 +242,7 @@ class VoiceService:
         audio_b64: str | None = None
         if tts_enabled:
             try:
-                audio_bytes_out = await self.synthesise(response_text, voice=voice)
+                audio_bytes_out = await self.synthesise(response_text, voice=voice, speed=speed)
                 if audio_bytes_out:
                     audio_b64 = base64.b64encode(audio_bytes_out).decode()
             except Exception:

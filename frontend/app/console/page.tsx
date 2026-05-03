@@ -357,7 +357,8 @@ export default function ConsolePage() {
 
   // ── Voice ──────────────────────────────────────────────────────────────────
   const voice = useVoice({
-    voice: "nova",
+    voice: "shimmer",
+    voiceSpeed: 0.88,
     ttsEnabled: true,
     onTranscript: (text) => {
       setVoiceQuery(text);
@@ -406,8 +407,9 @@ export default function ConsolePage() {
     }
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
+    utterance.rate = 0.86;
+    utterance.pitch = 0.96;
+    utterance.volume = 0.92;
     window.speechSynthesis.speak(utterance);
   };
 

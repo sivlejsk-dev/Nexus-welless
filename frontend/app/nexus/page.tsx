@@ -21,7 +21,7 @@ const MODULES = [
   { id: "food",       label: "Plant Food", icon: ChefHat,  color: "text-green-400"   },
 ] as const;
 
-const VOICES = ["nova", "alloy", "echo", "fable", "onyx", "shimmer"] as const;
+const VOICES = ["shimmer", "nova", "alloy", "echo", "fable", "onyx"] as const;
 
 const SUGGESTIONS = [
   "What foods reduce inflammation?",
@@ -92,7 +92,8 @@ export default function NexusPage() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState("nova");
+  const [selectedVoice, setSelectedVoice] = useState("shimmer");
+  const [voiceSpeed, setVoiceSpeed] = useState(0.88);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -146,6 +147,7 @@ export default function NexusPage() {
 
   const voice = useVoice({
     voice: selectedVoice,
+    voiceSpeed,
     ttsEnabled,
     onTranscript: (text) => { addMsg({ role: "user", content: text, via: "voice" }); setShowSuggestions(false); },
     onResponse: (r) => addMsg({ role: "nexus", content: r.response_text, via: "voice" }),
@@ -238,6 +240,20 @@ export default function NexusPage() {
                 className="bg-white/8 border border-white/10 rounded-lg px-2.5 py-1.5 text-white/80 text-xs focus:outline-none focus:border-violet-500/40">
                 {VOICES.map((v) => <option key={v} value={v} className="bg-zinc-900">{v.charAt(0).toUpperCase() + v.slice(1)}</option>)}
               </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-white/40 text-xs">Pace</span>
+              <input
+                type="range"
+                min="0.75"
+                max="1.1"
+                step="0.01"
+                value={voiceSpeed}
+                onChange={(e) => setVoiceSpeed(Number(e.target.value))}
+                className="w-24 accent-violet-500"
+                aria-label="Voice pace"
+              />
+              <span className="w-9 text-right text-white/30 text-xs">{voiceSpeed.toFixed(2)}x</span>
             </div>
             <label className="flex items-center gap-2.5 cursor-pointer select-none">
               <span className="text-white/40 text-xs">Speak responses</span>

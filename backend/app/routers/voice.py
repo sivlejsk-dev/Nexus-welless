@@ -16,7 +16,7 @@ from fastapi.responses import Response, StreamingResponse
 from app.db.base import get_db
 from app.middleware.auth import get_current_user
 from app.models.user import User
-from app.services.voice import voice_service, DEFAULT_VOICE
+from app.services.voice import voice_service, DEFAULT_VOICE, DEFAULT_VOICE_SPEED
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/voice", tags=["voice"])
@@ -37,6 +37,7 @@ async def get_voice_config(current_user: User = Depends(get_current_user)):
         "tts_available": voice_service._tts_configured,
         "available_voices": AVAILABLE_VOICES,
         "default_voice": DEFAULT_VOICE,
+        "default_speed": DEFAULT_VOICE_SPEED,
         "supported_formats": ["webm", "mp4", "m4a", "wav", "mp3", "ogg", "flac"],
         "max_audio_mb": MAX_AUDIO_BYTES // (1024 * 1024),
     }
@@ -76,7 +77,7 @@ async def transcribe_audio(
 async def synthesise_speech(
     text: str = Form(..., description="Text to synthesise (max 4096 chars)"),
     voice: str = Form(DEFAULT_VOICE, description="Voice: alloy, echo, fable, onyx, nova, shimmer"),
-    speed: float = Form(1.0, description="Speed multiplier 0.25–4.0"),
+    speed: float = Form(DEFAULT_VOICE_SPEED, description="Speed multiplier 0.25–4.0"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -116,6 +117,7 @@ async def synthesise_speech(
 async def voice_chat(
     audio: UploadFile = File(..., description="Recorded audio of the user's question"),
     voice: str = Form(DEFAULT_VOICE, description="TTS voice for the response"),
+    speed: float = Form(DEFAULT_VOICE_SPEED, description="TTS speed multiplier 0.25–4.0"),
     tts_enabled: bool = Form(True, description="Set false to skip TTS and get text only"),
     language: str | None = Form(None, description="BCP-47 language hint for STT"),
     current_user: User = Depends(get_current_user),
@@ -142,6 +144,8 @@ async def voice_chat(
 
     if voice not in AVAILABLE_VOICES:
         voice = DEFAULT_VOICE
+    if not (0.25 <= speed <= 4.0):
+        speed = DEFAULT_VOICE_SPEED
 
     # Build user profile from DB record
     profile = current_user.profile
@@ -162,6 +166,7 @@ async def voice_chat(
         user_id=str(current_user.id),
         user_profile=user_profile,
         voice=voice,
+        speed=speed,
         tts_enabled=tts_enabled,
         db=db,
     )

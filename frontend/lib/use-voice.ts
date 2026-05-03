@@ -44,6 +44,7 @@ export interface VoiceMessage {
 
 export interface UseVoiceOptions {
   voice?: string;           // TTS voice (nova, alloy, echo, fable, onyx, shimmer)
+  voiceSpeed?: number;      // TTS speed, lower values feel more meditative
   ttsEnabled?: boolean;     // set false to always use browser TTS
   language?: string;        // BCP-47 hint for Whisper, e.g. "en"
   onTranscript?: (text: string) => void;
@@ -70,7 +71,8 @@ export interface UseVoiceReturn {
 
 export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
   const {
-    voice = "nova",
+    voice = "shimmer",
+    voiceSpeed = 0.88,
     ttsEnabled = true,
     language,
     onTranscript,
@@ -152,14 +154,19 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
       }
       window.speechSynthesis.cancel();
       const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 1.0;
-      utt.pitch = 1.0;
+      utt.rate = 0.86;
+      utt.pitch = 0.96;
+      utt.volume = 0.92;
       // Prefer a natural-sounding voice
       const voices = window.speechSynthesis.getVoices();
       const preferred = voices.find(
         (v) =>
           v.lang.startsWith("en") &&
-          (v.name.includes("Natural") || v.name.includes("Neural") || v.name.includes("Samantha"))
+          (v.name.includes("Natural") ||
+            v.name.includes("Neural") ||
+            v.name.includes("Samantha") ||
+            v.name.includes("Serena") ||
+            v.name.includes("Ava"))
       );
       if (preferred) utt.voice = preferred;
       utt.onend = () => resolve();
@@ -239,7 +246,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
           let audio_b64: string | null = null;
           if (ttsEnabled) {
             try {
-              audio_b64 = await voiceApi.synthesise(responseText, voice);
+              audio_b64 = await voiceApi.synthesise(responseText, voice, voiceSpeed);
             } catch { /* non-fatal */ }
           }
 
@@ -341,7 +348,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
       transition("processing");
 
       try {
-        const result = await voiceChat(blob, { voice, ttsEnabled, language });
+        const result = await voiceChat(blob, { voice, voiceSpeed, ttsEnabled, language });
 
         if (cancelledRef.current) {
           transition("idle");
@@ -396,7 +403,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoiceReturn {
 
     recorder.start(250); // collect chunks every 250 ms
     transition("recording");
-  }, [state, voice, ttsEnabled, language, transition, onTranscript, onResponse, onError, browserTTSSupported, speakWithBrowser]);
+  }, [state, voice, voiceSpeed, ttsEnabled, language, transition, onTranscript, onResponse, onError, browserTTSSupported, speakWithBrowser]);
 
   // ── Stop recording (send to server) ─────────────────────────────────────────
   const stopRecording = useCallback(() => {
