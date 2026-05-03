@@ -1,34 +1,61 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Brain, Leaf, Star, Droplets, Sparkles, ChefHat, Monitor,
+  LayoutDashboard, Brain, Leaf, Star, Droplets, Sparkles,
+  ChefHat, Monitor, User, LogOut, Stethoscope, BarChart3, Eye,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",     label: "Dashboard",     icon: LayoutDashboard, color: "text-violet-400" },
-  { href: "/nexus",         label: "Nexus AI",      icon: Sparkles,        color: "text-violet-400" },
-  { href: "/console",       label: "Console",       icon: Monitor,         color: "text-indigo-400" },
-  { href: "/meditation",    label: "Meditation",    icon: Brain,           color: "text-sky-400"    },
-  { href: "/nutrition",     label: "Nutrition",     icon: Leaf,            color: "text-emerald-400"},
-  { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat,         color: "text-emerald-400"},
-  { href: "/detox",         label: "Detox",         icon: Droplets,        color: "text-cyan-400"   },
-  { href: "/astrology",     label: "Astrology",     icon: Star,            color: "text-amber-400"  },
+  { href: "/dashboard",     label: "Dashboard",     icon: LayoutDashboard, color: "text-violet-400"  },
+  { href: "/nexus",         label: "Nexus AI",      icon: Sparkles,        color: "text-violet-400"  },
+  { href: "/console",       label: "Console",       icon: Monitor,         color: "text-indigo-400"  },
+  { href: "/meditation",    label: "Meditation",    icon: Brain,           color: "text-sky-400"     },
+  { href: "/nutrition",     label: "Nutrition",     icon: Leaf,            color: "text-emerald-400" },
+  { href: "/food-medicine", label: "Food Medicine", icon: Stethoscope,     color: "text-emerald-400" },
+  { href: "/body-profile",  label: "Body Profile",  icon: BarChart3,       color: "text-violet-400"  },
+  { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat,         color: "text-emerald-400" },
+  { href: "/detox",         label: "Detox",         icon: Droplets,        color: "text-cyan-400"    },
+  { href: "/astrology",     label: "Astrology",     icon: Star,            color: "text-amber-400"   },
 ];
+
+const MOBILE_NAV = ["/dashboard", "/nexus", "/meditation", "/nutrition", "/astrology"];
+const FAB_HIDDEN_KEY = "nexus_fab_hidden";
+const FAB_VISIBILITY_EVENT = "nexus-fab-visibility";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, logout } = useAuth();
+  const [fabHidden, setFabHidden] = useState(false);
+
+  const handleLogout = () => { logout(); router.push("/login"); };
+  const isActive = (href: string) =>
+    pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+  const restoreFab = () => {
+    localStorage.removeItem(FAB_HIDDEN_KEY);
+    setFabHidden(false);
+    window.dispatchEvent(new Event(FAB_VISIBILITY_EVENT));
+  };
+
+  useEffect(() => {
+    const syncFabVisibility = () => setFabHidden(localStorage.getItem(FAB_HIDDEN_KEY) === "true");
+    syncFabVisibility();
+    window.addEventListener(FAB_VISIBILITY_EVENT, syncFabVisibility);
+    return () => window.removeEventListener(FAB_VISIBILITY_EVENT, syncFabVisibility);
+  }, []);
 
   return (
     <>
-      {/* ── Desktop sidebar ─────────────────────────────────────────────── */}
+      {/* Desktop sidebar */}
       <aside className="hidden md:flex fixed left-0 top-0 h-full w-60 flex-col z-40"
-        style={{ background: "rgba(7,7,15,0.85)", backdropFilter: "blur(24px)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+        style={{ background: "rgba(7,7,15,0.88)", backdropFilter: "blur(24px)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
 
-        {/* Logo */}
-        <div className="px-5 py-6">
+        <div className="px-5 py-6 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
               <Sparkles className="w-4.5 h-4.5 text-white" />
@@ -40,64 +67,77 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Section label */}
-        <p className="px-5 mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/20">Navigation</p>
+        <p className="px-5 mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/20 flex-shrink-0">Navigation</p>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto scrollbar-none">
           {NAV_ITEMS.map(({ href, label, icon: Icon, color }) => {
-            const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+            const active = isActive(href);
             return (
-              <Link
-                key={href}
-                href={href}
+              <Link key={href} href={href}
                 className={cn(
                   "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                  active
-                    ? "nav-active text-white"
-                    : "text-white/40 hover:text-white/80 hover:bg-white/4"
-                )}
-              >
+                  active ? "nav-active text-white" : "text-white/40 hover:text-white/80 hover:bg-white/4"
+                )}>
                 <Icon className={cn("w-4 h-4 flex-shrink-0 transition-colors", active ? color : "group-hover:text-white/60")} />
                 <span className="truncate">{label}</span>
-                {active && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
-                )}
+                {active && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />}
               </Link>
             );
           })}
         </nav>
 
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-white/5">
-          <div className="flex items-center gap-2">
-            <div className="pulse-dot flex-shrink-0" />
-            <span className="text-white/30 text-xs">All systems operational</span>
-          </div>
+        <div className="px-3 py-4 border-t border-white/5 flex-shrink-0 space-y-1">
+          {fabHidden && (
+            <button onClick={restoreFab}
+              className="w-full group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white/35 hover:text-violet-300 hover:bg-violet-500/8 transition-all">
+              <Eye className="w-4 h-4 flex-shrink-0" />
+              <span>Show floating Nexus</span>
+            </button>
+          )}
+          <Link href="/profile"
+            className={cn(
+              "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+              isActive("/profile") ? "nav-active text-white" : "text-white/40 hover:text-white/80 hover:bg-white/4"
+            )}>
+            <User className={cn("w-4 h-4 flex-shrink-0", isActive("/profile") ? "text-white/60" : "group-hover:text-white/60")} />
+            <div className="flex-1 min-w-0">
+              <p className="truncate">{user?.full_name ?? "Profile"}</p>
+              {user?.email && <p className="text-white/25 text-[10px] truncate">{user.email}</p>}
+            </div>
+          </Link>
+          <button onClick={handleLogout}
+            className="w-full group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white/30 hover:text-rose-400 hover:bg-rose-500/8 transition-all">
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            <span>Sign out</span>
+          </button>
         </div>
       </aside>
 
-      {/* ── Mobile bottom nav ───────────────────────────────────────────── */}
+      {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-1 py-2 safe-area-pb"
-        style={{ background: "rgba(7,7,15,0.92)", backdropFilter: "blur(24px)", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-        {NAV_ITEMS.map(({ href, label, icon: Icon, color }) => {
-          const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+        style={{ background: "rgba(7,7,15,0.95)", backdropFilter: "blur(24px)", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        {fabHidden && (
+          <button onClick={restoreFab}
+            className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-0 text-violet-300">
+            <Eye className="w-5 h-5 flex-shrink-0" />
+            <span className="text-[9px] font-medium truncate">Show</span>
+          </button>
+        )}
+        {NAV_ITEMS.filter((item) => MOBILE_NAV.includes(item.href)).map(({ href, label, icon: Icon, color }) => {
+          const active = isActive(href);
           return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-0",
-                active ? "bg-white/6" : ""
-              )}
-            >
+            <Link key={href} href={href}
+              className={cn("flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-0", active ? "bg-white/6" : "")}>
               <Icon className={cn("w-5 h-5 flex-shrink-0 transition-colors", active ? color : "text-white/30")} />
-              <span className={cn("text-[9px] font-medium truncate transition-colors", active ? "text-white/80" : "text-white/30")}>
-                {label}
-              </span>
+              <span className={cn("text-[9px] font-medium truncate transition-colors", active ? "text-white/80" : "text-white/30")}>{label}</span>
             </Link>
           );
         })}
+        <Link href="/profile"
+          className={cn("flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-0", isActive("/profile") ? "bg-white/6" : "")}>
+          <User className={cn("w-5 h-5 flex-shrink-0 transition-colors", isActive("/profile") ? "text-white/60" : "text-white/30")} />
+          <span className={cn("text-[9px] font-medium truncate transition-colors", isActive("/profile") ? "text-white/80" : "text-white/30")}>Profile</span>
+        </Link>
       </nav>
     </>
   );

@@ -1,6 +1,7 @@
 /**
  * Typed API client for the Nexus Wellness backend.
  * All requests include the JWT from localStorage when available.
+ * On 401, the access token is silently refreshed once and the request retried.
  */
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -11,9 +12,54 @@ function getToken(): string | null {
   return localStorage.getItem("nexus_access_token");
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("nexus_refresh_token");
+}
+
+function setTokens(access: string, refresh: string): void {
+  localStorage.setItem("nexus_access_token", access);
+  localStorage.setItem("nexus_refresh_token", refresh);
+}
+
+function clearTokens(): void {
+  localStorage.removeItem("nexus_access_token");
+  localStorage.removeItem("nexus_refresh_token");
+}
+
+// Prevent concurrent refresh races — one in-flight refresh shared by all callers.
+let _refreshPromise: Promise<string | null> | null = null;
+
+async function _doRefresh(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(`${API}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) { clearTokens(); return null; }
+    const data = await res.json();
+    setTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  } catch {
+    clearTokens();
+    return null;
+  }
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = _doRefresh().finally(() => { _refreshPromise = null; });
+  }
+  return _refreshPromise;
+}
+
 async function request<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  _retry = true,
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -23,7 +69,7 @@ async function request<T>(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), 90_000);
 
   try {
     const res = await fetch(`${API}${path}`, {
@@ -31,6 +77,18 @@ async function request<T>(
       headers,
       signal: controller.signal,
     });
+
+    // On 401, attempt a silent token refresh then retry once.
+    if (res.status === 401 && _retry) {
+      clearTimeout(timeout);
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return request<T>(path, options, false);
+      }
+      // Refresh failed — redirect to login.
+      if (typeof window !== "undefined") window.location.href = "/login";
+      throw new Error("Session expired. Please log in again.");
+    }
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
@@ -132,17 +190,59 @@ export const detox = {
 };
 
 // ── Nexus AI ──────────────────────────────────────────────────────────────────
+export interface NexusSession {
+  session_id: string;
+  primary_domain: string | null;
+  total_turns: number;
+  active_turns: number;
+  has_summary: boolean;
+  summary_preview: string | null;
+  created_at: string;
+  last_active: string;
+}
+
+export interface NexusTurn {
+  turn_index: number;
+  role: "user" | "assistant";
+  content: string;
+  domain: string | null;
+  intent: string | null;
+  created_at: string;
+}
+
+export interface NexusSessionDetail extends NexusSession {
+  summary: string | null;
+  turns: NexusTurn[];
+}
+
 export const nexus = {
   recommend: (module: string, context: Record<string, unknown> = {}, user_message?: string) =>
     request<NexusResponse>("/nexus/recommend", {
       method: "POST",
       body: JSON.stringify({ module, context, user_message }),
     }),
-  chat: (message: string) =>
+
+  chat: (message: string, module?: string) =>
     request<NexusChatResponse>("/nexus/chat", {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message: module ? `[${module}] ${message}` : message }),
     }),
+
+  /** List the current user's conversation sessions, most recent first. */
+  listSessions: (limit = 20) =>
+    request<{ sessions: NexusSession[]; count: number }>(`/nexus/sessions?limit=${limit}`),
+
+  /** Fetch full turn history for a specific session. */
+  getSession: (sessionId: string) =>
+    request<NexusSessionDetail>(`/nexus/sessions/${sessionId}`),
+
+  /** Delete a specific session. */
+  deleteSession: (sessionId: string) =>
+    request<{ deleted: boolean }>(`/nexus/sessions/${sessionId}`, { method: "DELETE" }),
+
+  /** Clear the active in-memory conversation context. */
+  clearSession: () =>
+    request<{ cleared: boolean }>("/nexus/session", { method: "DELETE" }),
 };
 
 // ── Media / Console ───────────────────────────────────────────────────────────
@@ -161,6 +261,18 @@ export const mediaApi = {
     request<MediaQueryResult>("/media/query", {
       method: "POST",
       body: JSON.stringify({ query, media_type }),
+    }),
+  generateVideo: (prompt: string, size = "1280x720", seconds = "8", model?: string) =>
+    request<MediaProviderJob>("/media/video/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, size, seconds, model }),
+    }),
+  getVideo: (videoId: string) =>
+    request<MediaProviderJob>(`/media/video/${videoId}`),
+  generateMusic: (prompt: string, provider = "auto", title?: string, instrumental = true) =>
+    request<MediaProviderJob>("/media/music/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, provider, title, instrumental }),
     }),
 };
 
@@ -182,7 +294,7 @@ export const meatSubs = {
 /** Upload audio blob and get back transcript + Nexus response + optional MP3. */
 export async function voiceChat(
   audioBlob: Blob,
-  opts: { voice?: string; ttsEnabled?: boolean; language?: string } = {}
+  opts: { voice?: string; voiceSpeed?: number; ttsEnabled?: boolean; language?: string } = {}
 ): Promise<VoiceChatResponse> {
   const token = getToken();
 
@@ -194,12 +306,13 @@ export async function voiceChat(
 
   const form = new FormData();
   form.append("audio", audioBlob, filename);
-  form.append("voice", opts.voice ?? "nova");
+  form.append("voice", opts.voice ?? "shimmer");
+  form.append("speed", String(opts.voiceSpeed ?? 0.88));
   form.append("tts_enabled", (opts.ttsEnabled ?? true).toString());
   if (opts.language) form.append("language", opts.language);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
     const res = await fetch(`${API}/voice/chat`, {
@@ -244,6 +357,40 @@ export async function transcribeAudio(
 export async function getVoiceConfig(): Promise<VoiceConfig> {
   return request<VoiceConfig>("/voice/config");
 }
+
+/** Namespaced voice helpers used by useVoice. */
+export const voice = {
+  /**
+   * Synthesise text to speech.
+   * Calls POST /voice/synthesise which returns raw MP3 bytes.
+   * Converts to base64 so it can be played via an Audio element.
+   * Returns null on any failure (TTS is non-critical).
+   */
+  async synthesise(text: string, voiceName = "shimmer", speed = 0.88): Promise<string | null> {
+    const token = getToken();
+    const form = new FormData();
+    form.append("text", text.slice(0, 4096));
+    form.append("voice", voiceName);
+    form.append("speed", String(speed));
+
+    try {
+      const res = await fetch(`${API}/voice/synthesise`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      if (!res.ok) return null;
+      const arrayBuf = await res.arrayBuffer();
+      // Convert binary MP3 to base64 for Audio element playback
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    } catch {
+      return null;
+    }
+  },
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface User {
@@ -445,6 +592,7 @@ export interface VoiceConfig {
   tts_available: boolean;
   available_voices: string[];
   default_voice: string;
+  default_speed?: number;
   supported_formats: string[];
   max_audio_mb: number;
 }
@@ -453,15 +601,39 @@ export interface VoiceConfig {
 
 export interface MediaConfig {
   dalle_available: boolean;
+  openai_video_available?: boolean;
+  music_available?: boolean;
   guides_available: boolean;
   fallback_images: boolean;
   supported_sizes: string[];
+  supported_styles?: string[];
   guide_count: number;
+  providers?: MediaProviderCapability[];
+}
+
+export interface MediaProviderCapability {
+  id: string;
+  label: string;
+  media_type: "image" | "video" | "music";
+  configured: boolean;
+  model: string;
+  status: string;
+  note: string;
+}
+
+export interface MediaProviderJob {
+  configured: boolean;
+  provider: string;
+  status: string;
+  message?: string;
+  video?: Record<string, unknown>;
+  music?: Record<string, unknown>;
+  request?: Record<string, unknown>;
 }
 
 export interface MediaImage {
   url: string;
-  source: "dalle-3" | "unsplash" | "local";
+  source: "dalle-3" | "gpt-image-1" | "unsplash" | "local" | string;
   prompt: string | null;
   revised_prompt: string | null;
   dalle_available: boolean;
@@ -504,8 +676,8 @@ export interface MediaVideo {
 }
 
 export interface MediaQueryResult {
-  type: "image" | "guide" | "guide_list" | "video";
-  data: MediaImage | MediaGuide | MediaGuideInfo[] | MediaVideo;
+  type: "image" | "guide" | "guide_list" | "video" | "music";
+  data: MediaImage | MediaGuide | MediaGuideInfo[] | MediaVideo | MediaProviderJob;
 }
 
 export interface MeatSubBase {
@@ -549,3 +721,113 @@ export interface MeatSubForMeat {
   substitutes: MeatSubBase[];
   recipes: MeatSubRecipe[];
 }
+
+// ── Food Medicine ─────────────────────────────────────────────────────────────
+
+export interface HealingFoodItem {
+  food: string;
+  reason: string;
+  evidence: string;
+}
+
+export interface SymptomAnalysis {
+  condition: string;
+  deficiencies: string[];
+  excesses: string[];
+  root_causes: string[];
+  healing_foods: HealingFoodItem[];
+  avoid: string[];
+  protocol: string;
+  nexus_insight: string | null;
+}
+
+export const foodMedicine = {
+  analyse: (symptoms: string[], include_nexus = true) =>
+    request<SymptomAnalysis[]>("/food-medicine/analyse", {
+      method: "POST",
+      body: JSON.stringify({ symptoms, include_nexus }),
+    }),
+  conditions: () =>
+    request<{ conditions: { key: string; label: string }[] }>("/food-medicine/conditions"),
+  condition: (key: string) =>
+    request<SymptomAnalysis & { condition: string }>(`/food-medicine/condition/${key}`),
+};
+
+// ── Body Profile ──────────────────────────────────────────────────────────────
+
+export interface PhysicalProfileData {
+  height_cm?: number;
+  weight_kg?: number;
+  age?: number;
+  biological_sex?: string;
+  body_fat_pct?: number;
+  waist_cm?: number;
+  hip_cm?: number;
+  resting_heart_rate?: number;
+  systolic_bp?: number;
+  diastolic_bp?: number;
+  fasting_glucose?: number;
+  activity_level?: string;
+  exercise_days_per_week?: number;
+  sleep_hours?: number;
+  smoker?: boolean;
+  alcohol_units_per_week?: number;
+  water_litres_per_day?: number;
+  medications?: string[];
+  diagnosed_conditions?: string[];
+  family_history?: string[];
+  diet_type?: string;
+  meal_frequency?: number;
+  intermittent_fasting?: boolean;
+}
+
+export interface PsychProfileData {
+  openness?: number;
+  conscientiousness?: number;
+  extraversion?: number;
+  agreeableness?: number;
+  neuroticism?: number;
+  stress_level?: number;
+  anxiety_level?: number;
+  mood_stability?: number;
+  motivation_level?: number;
+  self_esteem?: number;
+  mindfulness_practice?: boolean;
+  social_connection?: number;
+  purpose_clarity?: number;
+  trauma_history?: boolean;
+  therapy_current?: boolean;
+  cognitive_load?: number;
+  creativity_level?: number;
+  primary_mental_goal?: string;
+  biggest_mental_challenge?: string;
+}
+
+export interface BodyProfileAnalysis {
+  body_metrics: {
+    bmi?: number;
+    bmi_category?: string;
+    bmr_kcal?: number;
+    tdee_kcal?: number;
+    waist_hip_ratio?: number;
+    whr_risk?: string;
+    heart_rate_category?: string;
+  };
+  psych_metrics: {
+    big_five?: Record<string, number>;
+    resilience_index?: number;
+    mental_health_snapshot?: Record<string, number>;
+    overall_mental_wellness?: number;
+  };
+  nexus_analysis: string | null;
+}
+
+export const bodyProfile = {
+  analyse: (physical: PhysicalProfileData, psychological: PsychProfileData) =>
+    request<BodyProfileAnalysis>("/body-profile/analyse", {
+      method: "POST",
+      body: JSON.stringify({ physical, psychological }),
+    }),
+  questions: () =>
+    request<{ physical_sections: unknown[]; psychological_sections: unknown[] }>("/body-profile/questions"),
+};

@@ -32,9 +32,13 @@ numpy==1.26.4
 scikit-learn==1.5.2
 chromadb==0.5.23        # Vector store for RAG memory layer
 aiosqlite==0.20.0       # Async SQLite driver for dev/test
+textblob==0.18.0
 
 # Astrology / Ephemeris
 pyswisseph==2.10.3.2    # Swiss Ephemeris bindings
+
+# Rate limiting
+slowapi==0.1.9
 
 # Utilities
 python-dotenv==1.0.1

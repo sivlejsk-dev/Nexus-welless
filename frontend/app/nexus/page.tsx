@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { nexus, NexusChatResponse } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { nexus, NexusChatResponse, NexusTurn } from "@/lib/api";
 import { useVoice } from "@/lib/use-voice";
 import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
-import { Sparkles, Send, Brain, Leaf, Star, Droplets, Mic, Settings2, ChefHat, X } from "lucide-react";
+import {
+  Sparkles, Send, Brain, Leaf, Star, Droplets, Mic,
+  Settings2, ChefHat, X, History, Trash2, ImageIcon, Video, BookOpen, ExternalLink,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const MODULES = [
@@ -16,7 +21,7 @@ const MODULES = [
   { id: "food",       label: "Plant Food", icon: ChefHat,  color: "text-green-400"   },
 ] as const;
 
-const VOICES = ["nova", "alloy", "echo", "fable", "onyx", "shimmer"] as const;
+const VOICES = ["shimmer", "nova", "alloy", "echo", "fable", "onyx"] as const;
 
 const SUGGESTIONS = [
   "What foods reduce inflammation?",
@@ -26,18 +31,158 @@ const SUGGESTIONS = [
   "How do I make a plant-based burger that tastes like beef?",
 ];
 
+interface MediaPayload {
+  type: "image" | "video" | "guide";
+  // image fields
+  url?: string;
+  prompt?: string;
+  source?: string;
+  // video fields
+  job_id?: string;
+  status?: string;
+  video_url?: string;
+  // guide fields
+  title?: string;
+  steps?: { title: string; description: string; action: string; image_url?: string; icon?: string }[];
+}
+
 interface Message {
   id: string;
   role: "user" | "nexus";
   content: string;
-  via?: "text" | "voice";
+  media?: MediaPayload;
+  via?: "text" | "voice" | "history";
   ts: Date;
+}
+
+/** Renders image, video, or visual guide payloads inline in the chat. */
+function MediaRenderer({ media }: { media: MediaPayload }) {
+  if (media.type === "image") {
+    const modelLabel = (media as MediaPayload & { model?: string }).model;
+    const isAI = (media as MediaPayload & { ai_generated?: boolean }).ai_generated;
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <ImageIcon className="w-3 h-3" />
+          {isAI ? `AI-generated image${modelLabel ? ` · ${modelLabel}` : ""}` : "Image"}
+        </div>
+        {media.url ? (
+          <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-white/5 max-w-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={media.url}
+              alt={media.prompt ?? "AI generated image"}
+              className="w-full rounded-2xl object-cover"
+              loading="lazy"
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2 flex items-center justify-between">
+              {media.prompt && (
+                <p className="text-white/50 text-[10px] truncate flex-1 mr-2">{media.prompt}</p>
+              )}
+              {media.url && (
+                <a href={media.url} target="_blank" rel="noopener noreferrer"
+                  className="text-white/40 hover:text-white transition-colors flex-shrink-0">
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-white/40 text-sm bg-white/5 rounded-xl p-3 border border-white/10">
+            <ImageIcon className="w-4 h-4 flex-shrink-0" />
+            <span>Image unavailable — see description above.</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (media.type === "video") {
+    const provider = (media as MediaPayload & { provider?: string }).provider;
+    const isPollinationsReady = provider === "pollinations-video" && media.video_url;
+    const isSoraQueued = media.job_id && !media.video_url;
+
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <Video className="w-3 h-3" />
+          {isPollinationsReady ? "AI-generated video (Flux)" : isSoraQueued ? "Sora video rendering…" : "Video generation"}
+        </div>
+        {isPollinationsReady ? (
+          <div className="rounded-2xl overflow-hidden border border-white/10 bg-black max-w-lg">
+            <video
+              src={media.video_url}
+              controls
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full rounded-2xl"
+              onError={(e) => {
+                // If video fails to load, show a link instead
+                const el = e.currentTarget;
+                const parent = el.parentElement;
+                if (parent) {
+                  parent.innerHTML = `<a href="${media.video_url}" target="_blank" rel="noopener" class="flex items-center gap-2 p-3 text-violet-400 text-sm hover:text-violet-300">Open video in new tab →</a>`;
+                }
+              }}
+            />
+            {media.prompt && (
+              <p className="text-white/30 text-[10px] px-3 py-1.5 border-t border-white/8">{media.prompt}</p>
+            )}
+          </div>
+        ) : isSoraQueued ? (
+          <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-3 space-y-1">
+            <p className="text-violet-300 text-sm font-medium">Sora render queued</p>
+            <p className="text-white/40 text-xs">Job: <span className="font-mono">{media.job_id}</span></p>
+            <p className="text-white/40 text-xs">Status: {media.status ?? "processing"} — renders take 1-3 minutes.</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-white/40 text-sm bg-white/5 rounded-xl p-3 border border-white/10">
+            <Video className="w-4 h-4 flex-shrink-0" />
+            <span>Video unavailable — see description above.</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (media.type === "guide" && media.steps && media.steps.length > 0) {
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <BookOpen className="w-3 h-3" /> Visual guide
+        </div>
+        {media.title && <p className="text-white/80 font-semibold text-sm">{media.title}</p>}
+        <div className="space-y-2">
+          {media.steps.map((step, i) => (
+            <div key={i} className="bg-white/4 border border-white/8 rounded-xl p-3 space-y-1">
+              <div className="flex items-center gap-2">
+                {step.icon && <span className="text-base">{step.icon}</span>}
+                <p className="text-white/90 font-medium text-sm">{step.title}</p>
+              </div>
+              <p className="text-white/55 text-xs leading-relaxed">{step.description}</p>
+              {step.image_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={step.image_url} alt={step.title} className="w-full rounded-lg mt-1.5 object-cover max-h-40" />
+              )}
+              {step.action && (
+                <p className="text-emerald-400/80 text-xs mt-1">→ {step.action}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function TypingDots() {
   return (
     <div className="flex gap-1 items-center py-1">
-      {[0,1,2].map(i => (
+      {[0, 1, 2].map((i) => (
         <div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-400/60 animate-bounce"
           style={{ animationDelay: `${i * 0.18}s` }} />
       ))}
@@ -45,37 +190,109 @@ function TypingDots() {
   );
 }
 
+/** Render Nexus markdown responses with consistent styling. */
+function NexusMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p:      ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+        strong: ({ children }) => <strong className="text-white/95 font-semibold">{children}</strong>,
+        em:     ({ children }) => <em className="text-white/70 italic">{children}</em>,
+        ul:     ({ children }) => <ul className="list-disc list-inside space-y-1 mb-2 text-white/75">{children}</ul>,
+        ol:     ({ children }) => <ol className="list-decimal list-inside space-y-1 mb-2 text-white/75">{children}</ol>,
+        li:     ({ children }) => <li className="leading-relaxed">{children}</li>,
+        h1:     ({ children }) => <h1 className="text-white font-bold text-base mb-2 mt-1">{children}</h1>,
+        h2:     ({ children }) => <h2 className="text-white font-semibold text-sm mb-1.5 mt-1">{children}</h2>,
+        h3:     ({ children }) => <h3 className="text-white/90 font-medium text-sm mb-1 mt-1">{children}</h3>,
+        code:   ({ children }) => <code className="bg-white/10 rounded px-1 py-0.5 text-xs font-mono text-violet-300">{children}</code>,
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-2 border-violet-500/40 pl-3 my-2 text-white/60 italic">{children}</blockquote>
+        ),
+        hr: () => <hr className="border-white/10 my-3" />,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 export default function NexusPage() {
-  const [messages, setMessages] = useState<Message[]>([{
+  const WELCOME: Message = {
     id: "welcome",
     role: "nexus",
     content: "I'm Nexus — your personal wellness intelligence. Ask me anything about nutrition, meditation, detox, astrology, or plant-based cooking. Speak or type.",
     ts: new Date(),
-  }]);
+  };
+
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState("");
   const [module, setModule] = useState("general");
   const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState("nova");
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedVoice, setSelectedVoice] = useState("shimmer");
+  const [voiceSpeed, setVoiceSpeed] = useState(0.88);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const historyHydratedRef = useRef(false);
 
-  const addMsg = (msg: Omit<Message, "id" | "ts">) =>
-    setMessages(p => [...p, { ...msg, id: Math.random().toString(36).slice(2), ts: new Date() }]);
+  // ── Hydrate history from the most recent backend session on mount ──────────
+  useEffect(() => {
+    if (historyHydratedRef.current) return;
+    historyHydratedRef.current = true;
+
+    nexus.listSessions(1)
+      .then(async ({ sessions }) => {
+        if (!sessions.length) return;
+        const detail = await nexus.getSession(sessions[0].session_id);
+        if (!detail.turns.length) return;
+
+        const restored: Message[] = detail.turns.map((t: NexusTurn, i: number) => ({
+          id: `hist-${i}-${t.turn_index}-${t.role}`,
+          role: t.role === "user" ? "user" : "nexus",
+          content: t.content,
+          via: "history" as const,
+          ts: new Date(t.created_at),
+        }));
+
+        setMessages([
+          WELCOME,
+          {
+            id: "history-divider",
+            role: "nexus",
+            content: `_Resuming your last session (${detail.total_turns} turns)…_`,
+            via: "history",
+            ts: new Date(),
+          },
+          ...restored,
+        ]);
+        setShowSuggestions(false);
+      })
+      .catch(() => { /* history unavailable — start fresh */ })
+      .finally(() => setHistoryLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading, historyLoading]);
+
+  const addMsg = useCallback((msg: Omit<Message, "id" | "ts">) =>
+    setMessages((p) => [...p, { ...msg, id: Math.random().toString(36).slice(2), ts: new Date() }]),
+  []);
 
   const voice = useVoice({
     voice: selectedVoice,
+    voiceSpeed,
     ttsEnabled,
     onTranscript: (text) => { addMsg({ role: "user", content: text, via: "voice" }); setShowSuggestions(false); },
     onResponse: (r) => addMsg({ role: "nexus", content: r.response_text, via: "voice" }),
     onError: (err) => addMsg({ role: "nexus", content: `Voice error: ${err.message}` }),
   });
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading, voice.state]);
 
   const sendMessage = async (text?: string) => {
     const msg = (text ?? input).trim();
@@ -85,14 +302,22 @@ export default function NexusPage() {
     addMsg({ role: "user", content: msg, via: "text" });
     setLoading(true);
     try {
-      const res: NexusChatResponse = await nexus.chat(msg);
-      addMsg({ role: "nexus", content: res.response, via: "text" });
+      // Pass the active module so Nexus stays contextually focused.
+      const res = await nexus.chat(msg, module === "general" ? undefined : module) as NexusChatResponse & { media?: MediaPayload };
+      addMsg({ role: "nexus", content: res.response, media: res.media ?? undefined, via: "text" });
     } catch {
       addMsg({ role: "nexus", content: "Something went wrong — please try again." });
     } finally {
       setLoading(false);
       inputRef.current?.focus();
     }
+  };
+
+  const clearHistory = async () => {
+    await nexus.clearSession().catch(() => {});
+    setMessages([WELCOME]);
+    setShowSuggestions(true);
+    setShowHistory(false);
   };
 
   const voiceActive = voice.state !== "idle" && voice.state !== "error";
@@ -115,15 +340,28 @@ export default function NexusPage() {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setShowSettings(v => !v)}
-          className={cn(
-            "p-2 rounded-xl transition-all",
-            showSettings ? "bg-violet-500/20 text-violet-400" : "text-white/25 hover:text-white/60 hover:bg-white/5"
-          )}
-        >
-          <Settings2 className="w-4.5 h-4.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className={cn("p-2 rounded-xl transition-all", showHistory ? "bg-violet-500/20 text-violet-400" : "text-white/25 hover:text-white/60 hover:bg-white/5")}
+            title="Session history"
+          >
+            <History className="w-4 h-4" />
+          </button>
+          <button
+            onClick={clearHistory}
+            className="p-2 rounded-xl text-white/20 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+            title="Clear conversation"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowSettings((v) => !v)}
+            className={cn("p-2 rounded-xl transition-all", showSettings ? "bg-violet-500/20 text-violet-400" : "text-white/25 hover:text-white/60 hover:bg-white/5")}
+          >
+            <Settings2 className="w-4.5 h-4.5" />
+          </button>
+        </div>
       </div>
 
       {/* ── Settings panel ──────────────────────────────────────────────── */}
@@ -138,14 +376,28 @@ export default function NexusPage() {
           <div className="flex items-center gap-6 flex-wrap">
             <div className="flex items-center gap-2">
               <span className="text-white/40 text-xs">Voice</span>
-              <select value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)}
+              <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)}
                 className="bg-white/8 border border-white/10 rounded-lg px-2.5 py-1.5 text-white/80 text-xs focus:outline-none focus:border-violet-500/40">
-                {VOICES.map(v => <option key={v} value={v} className="bg-zinc-900">{v.charAt(0).toUpperCase()+v.slice(1)}</option>)}
+                {VOICES.map((v) => <option key={v} value={v} className="bg-zinc-900">{v.charAt(0).toUpperCase() + v.slice(1)}</option>)}
               </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-white/40 text-xs">Pace</span>
+              <input
+                type="range"
+                min="0.75"
+                max="1.1"
+                step="0.01"
+                value={voiceSpeed}
+                onChange={(e) => setVoiceSpeed(Number(e.target.value))}
+                className="w-24 accent-violet-500"
+                aria-label="Voice pace"
+              />
+              <span className="w-9 text-right text-white/30 text-xs">{voiceSpeed.toFixed(2)}x</span>
             </div>
             <label className="flex items-center gap-2.5 cursor-pointer select-none">
               <span className="text-white/40 text-xs">Speak responses</span>
-              <button onClick={() => setTtsEnabled(v => !v)}
+              <button onClick={() => setTtsEnabled((v) => !v)}
                 className={cn("relative w-9 h-5 rounded-full transition-colors duration-200", ttsEnabled ? "bg-violet-600" : "bg-white/10")}>
                 <span className={cn("absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200", ttsEnabled && "translate-x-4")} />
               </button>
@@ -173,12 +425,22 @@ export default function NexusPage() {
       {/* ── Messages ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 space-y-4 min-h-0 pb-2">
 
-        {/* Suggestion chips — shown only before first user message */}
-        {showSuggestions && (
+        {/* History loading skeleton */}
+        {historyLoading && (
+          <div className="space-y-3 pt-2">
+            {[1, 0.8, 0.9].map((w, i) => (
+              <div key={i} className={cn("skeleton h-10 rounded-2xl", i % 2 === 0 ? "mr-12" : "ml-12")}
+                style={{ width: `${w * 100}%` }} />
+            ))}
+          </div>
+        )}
+
+        {/* Suggestion chips */}
+        {!historyLoading && showSuggestions && (
           <div className="space-y-2 animate-fade-up">
             <p className="text-white/20 text-xs text-center pt-2">Try asking…</p>
             <div className="flex flex-wrap gap-2 justify-center">
-              {SUGGESTIONS.map(s => (
+              {SUGGESTIONS.map((s) => (
                 <button key={s} onClick={() => sendMessage(s)}
                   className="px-3 py-1.5 rounded-full text-xs bg-white/4 border border-white/8 text-white/50 hover:text-white/80 hover:bg-white/8 hover:border-violet-500/30 transition-all">
                   {s}
@@ -188,7 +450,7 @@ export default function NexusPage() {
           </div>
         )}
 
-        {messages.map((msg) => (
+        {!historyLoading && messages.map((msg) => (
           <div key={msg.id} className={cn("flex gap-2.5 animate-fade-up", msg.role === "user" ? "justify-end" : "justify-start")}>
             {msg.role === "nexus" && (
               <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5 shadow-md shadow-violet-500/20">
@@ -198,15 +460,25 @@ export default function NexusPage() {
             <div className={cn("max-w-[85%] space-y-1", msg.role === "user" && "items-end flex flex-col")}>
               <div className={cn(
                 "rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                msg.role === "user" ? "bubble-user text-white" : "bubble-nexus text-white/80"
+                msg.role === "user" ? "bubble-user text-white" : "bubble-nexus text-white/80",
+                msg.via === "history" && "opacity-70"
               )}>
-                {msg.content}
+                {msg.role === "nexus" && msg.media && (
+                  <MediaRenderer media={msg.media} />
+                )}
+                {msg.role === "nexus"
+                  ? <NexusMarkdown content={msg.content} />
+                  : msg.content
+                }
               </div>
               {msg.via === "voice" && (
                 <div className={cn("flex items-center gap-1 px-1", msg.role === "user" ? "justify-end" : "justify-start")}>
                   <Mic className="w-2.5 h-2.5 text-white/15" />
                   <span className="text-white/15 text-[10px]">voice</span>
                 </div>
+              )}
+              {msg.via === "history" && msg.role === "nexus" && msg.id !== "history-divider" && (
+                <span className="text-white/15 text-[10px] px-1">restored</span>
               )}
             </div>
           </div>
@@ -235,8 +507,8 @@ export default function NexusPage() {
               ref={inputRef}
               type="text"
               value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && sendMessage()}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
               placeholder={
                 voice.state === "recording"  ? "Listening…"  :
                 voice.state === "processing" ? "Processing…" :

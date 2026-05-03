@@ -22,6 +22,7 @@ voice_chat() is a convenience wrapper that:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from typing import Any
@@ -33,7 +34,9 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 # TTS voice options (OpenAI-compatible): alloy, echo, fable, onyx, nova, shimmer
-DEFAULT_VOICE = "nova"
+# Shimmer at a slightly slower pace gives Nexus the calmest default presence.
+DEFAULT_VOICE = "shimmer"
+DEFAULT_VOICE_SPEED = 0.88
 DEFAULT_TTS_MODEL = "tts-1"
 DEFAULT_STT_MODEL = "whisper-1"
 # Groq uses a different model name for Whisper
@@ -79,45 +82,69 @@ class VoiceService:
             }
         """
         if not self._stt_configured:
-            log.warning("VoiceService: no API key set — STT unavailable")
+            log.warning("STT not configured — no API key set")
             return {"transcript": "", "language": None, "duration": None, "configured": False}
 
-        # Try Groq Whisper first (free), fall back to OpenAI Whisper.
-        # Groq requires "whisper-large-v3-turbo"; OpenAI uses "whisper-1".
-        providers: list[tuple[str, str, str]] = []
+        # Prefer Groq Whisper (fast, free tier)
         if self._groq_key:
-            providers.append((self._groq_base, self._groq_key, GROQ_STT_MODEL))
-        if self._openai_key:
-            providers.append((self._openai_base, self._openai_key, DEFAULT_STT_MODEL))
-
-        last_exc: Exception | None = None
-        for base_url, api_key, stt_model in providers:
             try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    files = {"file": (filename, io.BytesIO(audio_bytes), _mime_for(filename))}
-                    data: dict[str, str] = {"model": stt_model, "response_format": "json"}
-                    if language:
-                        data["language"] = language
-                    resp = await client.post(
-                        f"{base_url}/audio/transcriptions",
-                        headers={"Authorization": f"Bearer {api_key}"},
-                        files=files,
-                        data=data,
-                    )
-                    resp.raise_for_status()
-                    body = resp.json()
-                    return {
-                        "transcript": body.get("text", "").strip(),
-                        "language": body.get("language"),
-                        "duration": body.get("duration"),
-                        "configured": True,
-                    }
+                return await self._transcribe_with(
+                    base_url=self._groq_base,
+                    api_key=self._groq_key,
+                    model=GROQ_STT_MODEL,
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    language=language,
+                )
             except Exception as exc:
-                log.warning("STT provider %s failed: %s", base_url, exc)
-                last_exc = exc
-                continue
+                log.warning("Groq STT failed, falling back to OpenAI: %s", exc)
 
-        raise last_exc or RuntimeError("All STT providers failed")
+        # Fall back to OpenAI Whisper
+        if self._openai_key:
+            try:
+                return await self._transcribe_with(
+                    base_url=self._openai_base,
+                    api_key=self._openai_key,
+                    model=DEFAULT_STT_MODEL,
+                    audio_bytes=audio_bytes,
+                    filename=filename,
+                    language=language,
+                )
+            except Exception as exc:
+                log.error("OpenAI STT failed: %s", exc)
+
+        return {"transcript": "", "language": None, "duration": None, "configured": True}
+
+    async def _transcribe_with(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        audio_bytes: bytes,
+        filename: str,
+        language: str | None,
+    ) -> dict[str, Any]:
+        mime = _mime_for(filename)
+        _stt_timeout = httpx.Timeout(connect=8.0, read=30.0, write=15.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=_stt_timeout) as client:
+            files = {"file": (filename, io.BytesIO(audio_bytes), mime)}
+            data: dict[str, str] = {"model": model, "response_format": "verbose_json"}
+            if language:
+                data["language"] = language
+            resp = await client.post(
+                f"{base_url}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files=files,
+                data=data,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            return {
+                "transcript": body.get("text", "").strip(),
+                "language": body.get("language"),
+                "duration": body.get("duration"),
+                "configured": True,
+            }
 
     # ── TTS ───────────────────────────────────────────────────────────────────
 
@@ -135,36 +162,44 @@ class VoiceService:
         fall back to the browser's Web Speech API.
         """
         if not self._tts_configured:
-            log.warning("VoiceService: NEXUS_API_KEY not set — TTS unavailable, use browser TTS")
             return None
 
-        # Truncate very long responses to avoid TTS timeouts (4096 char limit)
-        text = text[:4096]
+        # Tighter timeout for TTS — 20s is plenty; 60s blocks the server
+        _tts_timeout = httpx.Timeout(connect=8.0, read=20.0, write=8.0, pool=5.0)
 
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    f"{self._openai_base}/audio/speech",
-                    headers={
-                        "Authorization": f"Bearer {self._openai_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "input": text,
-                        "voice": voice,
-                        "response_format": TTS_RESPONSE_FORMAT,
-                        "speed": speed,
-                    },
-                )
-                resp.raise_for_status()
-                return resp.content
-        except httpx.HTTPStatusError as exc:
-            log.error("TTS HTTP error %s: %s", exc.response.status_code, exc.response.text[:200])
-            raise
-        except Exception as exc:
-            log.error("TTS error: %s", exc)
-            raise
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=_tts_timeout) as client:
+                    resp = await client.post(
+                        f"{self._openai_base}/audio/speech",
+                        headers={
+                            "Authorization": f"Bearer {self._openai_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "input": text[:4096],
+                            "voice": voice,
+                            "response_format": TTS_RESPONSE_FORMAT,
+                            "speed": speed,
+                        },
+                    )
+                    if resp.status_code == 429:
+                        # Rate limited — wait briefly then retry once, then give up
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                            continue
+                        log.warning("TTS rate limited after retry — skipping audio")
+                        return None
+                    resp.raise_for_status()
+                    return resp.content
+            except asyncio.TimeoutError:
+                log.warning("TTS timeout on attempt %d — skipping audio", attempt + 1)
+                return None
+            except Exception as exc:
+                log.warning("TTS synthesis failed: %s", exc)
+                return None
+        return None
 
     # ── Combined voice chat ───────────────────────────────────────────────────
 
@@ -175,6 +210,7 @@ class VoiceService:
         user_id: str,
         user_profile: dict[str, Any] | None = None,
         voice: str = DEFAULT_VOICE,
+        speed: float = DEFAULT_VOICE_SPEED,
         tts_enabled: bool = True,
         db: Any | None = None,
     ) -> dict[str, Any]:
@@ -223,7 +259,7 @@ class VoiceService:
         audio_b64: str | None = None
         if tts_enabled:
             try:
-                audio_bytes_out = await self.synthesise(response_text, voice=voice)
+                audio_bytes_out = await self.synthesise(response_text, voice=voice, speed=speed)
                 if audio_bytes_out:
                     audio_b64 = base64.b64encode(audio_bytes_out).decode()
             except Exception:

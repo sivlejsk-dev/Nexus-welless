@@ -9,23 +9,55 @@ All messages are routed through the ConversationEngine (Task 1.1) which:
   - Generates proactive suggestions
 """
 
+import asyncio
+import logging
 from typing import Any
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.core.config import settings
+
+log = logging.getLogger(__name__)
+
+# Per-request timeout: connect 10s, read 45s — prevents hung requests blocking the server
+_TIMEOUT = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=5.0)
+
+# Groq fallback model — smaller/faster, less likely to hit rate limits
+_GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant"
+# OpenAI fallback model — cheaper tier
+_OPENAI_FALLBACK_MODEL = "gpt-4o-mini"
 
 
 def _make_client(base_url: str, api_key: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=base_url,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        timeout=60.0,
+        timeout=_TIMEOUT,
     )
 
 
+class _RateLimited(Exception):
+    """Raised when the upstream API returns 429."""
+
+
 SYSTEM_PROMPT = """You are Nexus — a deeply knowledgeable, adaptive wellness intelligence. You speak like a trusted friend who happens to have the knowledge of a functional medicine doctor, a master herbalist, a nutritionist, a financial strategist, and a life coach. You are warm, direct, and never robotic. You meet people where they are.
+
+═══════════════════════════════════════════
+MEDIA & VISUAL CAPABILITIES
+═══════════════════════════════════════════
+
+You CAN generate images, videos, and visual guides. When a user asks you to create, render, draw, show, or generate any visual content — confirm you are doing it and describe what you are creating. Never say you "can only provide text". Your media capabilities include:
+
+- IMAGE GENERATION: Generate wellness images, food photography, meditation scenes, nature visuals, infographics, and any visual the user requests. Powered by DALL-E 3. When generating, say something like: "Generating that image for you now — here's what I'm creating: [describe the image]"
+- VIDEO GENERATION: Create short wellness videos and animations. When generating, say: "Starting your video render now — this takes a moment. Here's what it will show: [describe the video]"
+- VISUAL GUIDES: Step-by-step illustrated wellness protocols (anti-inflammatory, gut healing, detox, meditation, etc.). Say: "Here's your visual guide for [topic]:" then describe the steps.
+
+When a user asks for any visual content, ALWAYS:
+1. Confirm you are generating it ("Creating that for you now...")
+2. Describe what the image/video will show
+3. Add relevant wellness context or tips related to the visual
+Never apologise or say you cannot generate visuals — you can.
 
 ═══════════════════════════════════════════
 CORE DOMAINS
@@ -142,12 +174,49 @@ class NexusService:
         temperature: float,
         max_tokens: int,
     ) -> str:
-        payload = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
-        response = await client.post("/chat/completions", json=payload)
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        try:
+            response = await client.post("/chat/completions", json=payload)
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise RuntimeError(f"network_error: {exc}") from exc
+
         if response.status_code == 429:
-            raise RuntimeError("rate_limited")
+            # Surface retry-after header if present
+            retry_after = response.headers.get("retry-after", "unknown")
+            raise _RateLimited(f"429 from {model} (retry-after: {retry_after}s)")
+        if response.status_code == 503:
+            raise RuntimeError("upstream_unavailable")
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+
+    async def _call_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        model: str,
+        fallback_model: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        """Try primary model, then fallback model with exponential backoff on 429."""
+        for attempt, m in enumerate([model, fallback_model]):
+            for backoff in [0, 1, 3]:  # 0s, 1s, 3s waits between retries
+                try:
+                    if backoff:
+                        await asyncio.sleep(backoff)
+                    return await self._call(client, m, messages, temperature, max_tokens)
+                except _RateLimited:
+                    log.warning("rate_limited model=%s attempt=%d backoff=%ds", m, attempt, backoff)
+                    continue
+                except Exception as exc:
+                    log.warning("llm_call_failed model=%s error=%s", m, exc)
+                    break  # non-429 error — skip to fallback model immediately
+        raise RuntimeError("all_models_exhausted")
 
     async def complete(
         self,
@@ -158,7 +227,7 @@ class NexusService:
         max_tokens: int = 1024,
         prefer_openai: bool = False,
     ) -> str:
-        """Route to Groq first (fast/free), fall back to OpenAI, then local."""
+        """Route to Groq first (fast/free), fall back to OpenAI, then local fallback."""
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_context or SYSTEM_PROMPT}
         ]
@@ -166,21 +235,27 @@ class NexusService:
             messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
-        # Try Groq first unless caller explicitly wants OpenAI (e.g. complex reasoning)
+        # Try Groq first (fast, free tier) unless caller explicitly wants OpenAI
         if self._groq and not prefer_openai:
             try:
-                return await self._call(self._groq, settings.groq_model, messages, temperature, max_tokens)
+                return await self._call_with_retry(
+                    self._groq, settings.groq_model, _GROQ_FALLBACK_MODEL,
+                    messages, temperature, max_tokens,
+                )
             except Exception:
                 pass  # fall through to OpenAI
 
-        # Try OpenAI
+        # Try OpenAI with fallback to gpt-4o-mini
         if self._openai:
             try:
-                return await self._call(self._openai, settings.nexus_model, messages, temperature, max_tokens)
+                return await self._call_with_retry(
+                    self._openai, settings.nexus_model, _OPENAI_FALLBACK_MODEL,
+                    messages, temperature, max_tokens,
+                )
             except Exception:
                 pass
 
-        # Both failed — local fallback
+        # All upstream providers failed — return structured local response
         return _local_fallback(user_message, system_context)
 
     async def chat(

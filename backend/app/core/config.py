@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     nexus_api_key: str = ""
     nexus_api_base_url: str = "https://api.openai.com/v1"
     nexus_model: str = "gpt-4o"
+    openai_image_model: str = "dall-e-3"
+    openai_video_model: str = "sora-2"
 
     # ── Groq (fast chat) ─────────────────────────────────────
     groq_api_key: str = ""
@@ -50,6 +52,15 @@ class Settings(BaseSettings):
 
     astrology_api_key: str = ""
     astrology_api_base_url: str = "https://api.astrology-engine.example.com/v1"
+
+    # ── Creative media providers ─────────────────────────────
+    elevenlabs_api_key: str = ""
+    elevenlabs_api_base_url: str = "https://api.elevenlabs.io/v1"
+    elevenlabs_music_model: str = "music_v1"
+
+    suno_api_key: str = ""
+    suno_api_base_url: str = "https://api.sunoapi.org"
+    suno_music_model: str = "V5"
 
     # ── Storage ──────────────────────────────────────────────
     storage_backend: Literal["local", "s3", "gcs"] = "local"

@@ -3,12 +3,15 @@
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.routers import astrology, auth, detox, meat_substitutes, media, meditation, nexus, nutrition, users, voice
+from app.core.limiter import limiter
+from app.routers import astrology, auth, body_profile, detox, food_medicine, meat_substitutes, media, meditation, nexus, nutrition, users, voice
 
 log = structlog.get_logger()
 
@@ -45,6 +48,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded. {exc.detail}"},
+    )
+
 # ── Middleware ────────────────────────────────────────────────────────────────
 
 app.add_middleware(
@@ -71,6 +85,8 @@ app.include_router(nexus.router, prefix=API_PREFIX)
 app.include_router(voice.router, prefix=API_PREFIX)
 app.include_router(meat_substitutes.router, prefix=API_PREFIX)
 app.include_router(media.router, prefix=API_PREFIX)
+app.include_router(food_medicine.router, prefix=API_PREFIX)
+app.include_router(body_profile.router, prefix=API_PREFIX)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────

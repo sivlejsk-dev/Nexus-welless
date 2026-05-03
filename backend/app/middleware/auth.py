@@ -15,6 +15,7 @@ from app.models.user import User, WellnessProfile
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# Kept for backward-compat imports elsewhere; no longer used as a shared account.
 GUEST_EMAIL = "guest@nexus.local"
 
 
@@ -27,12 +28,29 @@ async def _load_profile(db: AsyncSession, user: User) -> User:
     return user
 
 
-async def _get_or_create_guest(db: AsyncSession) -> User:
-    result = await db.execute(select(User).where(User.email == GUEST_EMAIL))
+async def _get_or_create_guest(db: AsyncSession, guest_id: uuid.UUID | None = None) -> User:
+    """
+    Return a guest User for the given UUID, creating it if needed.
+
+    Each guest session gets its own UUID (issued by POST /auth/guest), so
+    guests never share conversation history or vector memory with each other.
+    When no UUID is provided (unauthenticated request with no token at all),
+    a fresh UUID is generated — the caller won't be able to resume that
+    session, but they also won't pollute anyone else's data.
+    """
+    if guest_id is None:
+        guest_id = uuid.uuid4()
+
+    # Unique email per guest UUID keeps the unique constraint happy.
+    guest_email = f"guest-{guest_id}@nexus.local"
+
+    result = await db.execute(select(User).where(User.id == guest_id))
     guest = result.scalar_one_or_none()
+
     if not guest:
         guest = User(
-            email=GUEST_EMAIL,
+            id=guest_id,
+            email=guest_email,
             hashed_password="",
             full_name="Guest",
             is_active=True,
@@ -41,6 +59,7 @@ async def _get_or_create_guest(db: AsyncSession) -> User:
         db.add(guest)
         await db.commit()
         await db.refresh(guest)
+
     guest.__dict__["profile"] = None
     return guest
 
@@ -49,7 +68,7 @@ async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    # No token — use guest so all endpoints work without login
+    # No token — create a one-off anonymous guest (no persistent session).
     if credentials is None:
         return await _get_or_create_guest(db)
 
@@ -57,6 +76,7 @@ async def get_current_user(
     try:
         payload = decode_token(token)
         user_id: str = payload["sub"]
+        is_guest: bool = payload.get("guest", False)
     except (JWTError, KeyError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,7 +84,13 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    uid = uuid.UUID(user_id)
+
+    # Guest tokens resolve to their own isolated guest user row.
+    if is_guest:
+        return await _get_or_create_guest(db, guest_id=uid)
+
+    result = await db.execute(select(User).where(User.id == uid))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(
