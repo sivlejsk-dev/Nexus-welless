@@ -9,9 +9,6 @@ services:
         value: production
       - key: NEXT_PUBLIC_API_URL
         value: ${backend.url}
-    routes:
-      - path: /
-    staticPublishPath: frontend/.next
 
   - type: web
     name: nexus-backend
@@ -32,20 +29,15 @@ services:
         value: production
       - key: DEBUG
         value: "false"
-    routes:
-      - path: /api
 
-  - type: pserv
+  - type: redis
     name: nexus-cache
-    env: docker
-    repo: https://github.com/render-examples/redis
-    autoDeploy: false
+    version: "7"
+    plan: free
 
 databases:
   - name: nexus_db
     engine: postgres
     version: "16"
     initialDatabase: nexus_wellness
-    user: nexus_user
-    envVars:
-      - key: DATABASE_URL
+    plan: free
