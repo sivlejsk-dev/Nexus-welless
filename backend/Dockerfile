@@ -1,10 +1,12 @@
-FROM python:3.12-slim
+fails FROM python:3.12-slim
 
 WORKDIR /app
 
 # System deps for psycopg2 and pyswisseph
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    libc6-dev \
+    pkg-config \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
