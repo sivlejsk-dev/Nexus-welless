@@ -262,6 +262,18 @@ export const mediaApi = {
       method: "POST",
       body: JSON.stringify({ query, media_type }),
     }),
+  generateVideo: (prompt: string, size = "1280x720", seconds = "8", model?: string) =>
+    request<MediaProviderJob>("/media/video/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, size, seconds, model }),
+    }),
+  getVideo: (videoId: string) =>
+    request<MediaProviderJob>(`/media/video/${videoId}`),
+  generateMusic: (prompt: string, provider = "auto", title?: string, instrumental = true) =>
+    request<MediaProviderJob>("/media/music/generate", {
+      method: "POST",
+      body: JSON.stringify({ prompt, provider, title, instrumental }),
+    }),
 };
 
 // ── Meat Substitutes ──────────────────────────────────────────────────────────
@@ -589,15 +601,39 @@ export interface VoiceConfig {
 
 export interface MediaConfig {
   dalle_available: boolean;
+  openai_video_available?: boolean;
+  music_available?: boolean;
   guides_available: boolean;
   fallback_images: boolean;
   supported_sizes: string[];
+  supported_styles?: string[];
   guide_count: number;
+  providers?: MediaProviderCapability[];
+}
+
+export interface MediaProviderCapability {
+  id: string;
+  label: string;
+  media_type: "image" | "video" | "music";
+  configured: boolean;
+  model: string;
+  status: string;
+  note: string;
+}
+
+export interface MediaProviderJob {
+  configured: boolean;
+  provider: string;
+  status: string;
+  message?: string;
+  video?: Record<string, unknown>;
+  music?: Record<string, unknown>;
+  request?: Record<string, unknown>;
 }
 
 export interface MediaImage {
   url: string;
-  source: "dalle-3" | "unsplash" | "local";
+  source: "dalle-3" | "gpt-image-1" | "unsplash" | "local" | string;
   prompt: string | null;
   revised_prompt: string | null;
   dalle_available: boolean;
@@ -640,8 +676,8 @@ export interface MediaVideo {
 }
 
 export interface MediaQueryResult {
-  type: "image" | "guide" | "guide_list" | "video";
-  data: MediaImage | MediaGuide | MediaGuideInfo[] | MediaVideo;
+  type: "image" | "guide" | "guide_list" | "video" | "music";
+  data: MediaImage | MediaGuide | MediaGuideInfo[] | MediaVideo | MediaProviderJob;
 }
 
 export interface MeatSubBase {
@@ -685,3 +721,113 @@ export interface MeatSubForMeat {
   substitutes: MeatSubBase[];
   recipes: MeatSubRecipe[];
 }
+
+// ── Food Medicine ─────────────────────────────────────────────────────────────
+
+export interface HealingFoodItem {
+  food: string;
+  reason: string;
+  evidence: string;
+}
+
+export interface SymptomAnalysis {
+  condition: string;
+  deficiencies: string[];
+  excesses: string[];
+  root_causes: string[];
+  healing_foods: HealingFoodItem[];
+  avoid: string[];
+  protocol: string;
+  nexus_insight: string | null;
+}
+
+export const foodMedicine = {
+  analyse: (symptoms: string[], include_nexus = true) =>
+    request<SymptomAnalysis[]>("/food-medicine/analyse", {
+      method: "POST",
+      body: JSON.stringify({ symptoms, include_nexus }),
+    }),
+  conditions: () =>
+    request<{ conditions: { key: string; label: string }[] }>("/food-medicine/conditions"),
+  condition: (key: string) =>
+    request<SymptomAnalysis & { condition: string }>(`/food-medicine/condition/${key}`),
+};
+
+// ── Body Profile ──────────────────────────────────────────────────────────────
+
+export interface PhysicalProfileData {
+  height_cm?: number;
+  weight_kg?: number;
+  age?: number;
+  biological_sex?: string;
+  body_fat_pct?: number;
+  waist_cm?: number;
+  hip_cm?: number;
+  resting_heart_rate?: number;
+  systolic_bp?: number;
+  diastolic_bp?: number;
+  fasting_glucose?: number;
+  activity_level?: string;
+  exercise_days_per_week?: number;
+  sleep_hours?: number;
+  smoker?: boolean;
+  alcohol_units_per_week?: number;
+  water_litres_per_day?: number;
+  medications?: string[];
+  diagnosed_conditions?: string[];
+  family_history?: string[];
+  diet_type?: string;
+  meal_frequency?: number;
+  intermittent_fasting?: boolean;
+}
+
+export interface PsychProfileData {
+  openness?: number;
+  conscientiousness?: number;
+  extraversion?: number;
+  agreeableness?: number;
+  neuroticism?: number;
+  stress_level?: number;
+  anxiety_level?: number;
+  mood_stability?: number;
+  motivation_level?: number;
+  self_esteem?: number;
+  mindfulness_practice?: boolean;
+  social_connection?: number;
+  purpose_clarity?: number;
+  trauma_history?: boolean;
+  therapy_current?: boolean;
+  cognitive_load?: number;
+  creativity_level?: number;
+  primary_mental_goal?: string;
+  biggest_mental_challenge?: string;
+}
+
+export interface BodyProfileAnalysis {
+  body_metrics: {
+    bmi?: number;
+    bmi_category?: string;
+    bmr_kcal?: number;
+    tdee_kcal?: number;
+    waist_hip_ratio?: number;
+    whr_risk?: string;
+    heart_rate_category?: string;
+  };
+  psych_metrics: {
+    big_five?: Record<string, number>;
+    resilience_index?: number;
+    mental_health_snapshot?: Record<string, number>;
+    overall_mental_wellness?: number;
+  };
+  nexus_analysis: string | null;
+}
+
+export const bodyProfile = {
+  analyse: (physical: PhysicalProfileData, psychological: PsychProfileData) =>
+    request<BodyProfileAnalysis>("/body-profile/analyse", {
+      method: "POST",
+      body: JSON.stringify({ physical, psychological }),
+    }),
+  questions: () =>
+    request<{ physical_sections: unknown[]; psychological_sections: unknown[] }>("/body-profile/questions"),
+};

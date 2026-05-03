@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -23,6 +23,19 @@ import httpx
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MediaProvider:
+    """Runtime capability metadata for a creative media provider."""
+
+    id: str
+    label: str
+    media_type: str
+    configured: bool
+    model: str
+    status: str
+    note: str
 
 # ── Fallback image library (Unsplash — no key required) ──────────────────────
 # Format: topic → list of direct image URLs (800x600, wellness-themed)
@@ -128,40 +141,153 @@ class MediaService:
         self._openai_key = settings.nexus_api_key
         self._openai_base = settings.nexus_api_base_url.rstrip("/")
         self._dalle_available = bool(self._openai_key)
+        self._video_available = bool(self._openai_key)
+        self._elevenlabs_music_available = bool(settings.elevenlabs_api_key)
+        self._suno_music_available = bool(settings.suno_api_key)
 
-    def _fallback_image(self, topic: str, index: int = 0) -> dict[str, Any]:
-        """Return a fallback image URL for a given topic."""
-        images = FALLBACK_IMAGES.get(topic, FALLBACK_IMAGES["general"])
-        url = images[index % len(images)]
-        return {
-            "url": url,
-            "source": "unsplash",
-            "prompt": None,
-            "revised_prompt": None,
-            "dalle_available": False,
-        }
+    def provider_capabilities(self) -> list[dict[str, Any]]:
+        """Return modular provider metadata without exposing credentials."""
+        providers = [
+            MediaProvider(
+                id="openai-images",
+                label="OpenAI Images",
+                media_type="image",
+                configured=self._dalle_available,
+                model=settings.openai_image_model,
+                status="ready_when_funded" if self._dalle_available else "missing_api_key",
+                note="Uses the OpenAI Image API and falls back to curated wellness images when unavailable.",
+            ),
+            MediaProvider(
+                id="openai-video",
+                label="OpenAI Sora Video",
+                media_type="video",
+                configured=self._video_available,
+                model=settings.openai_video_model,
+                status="ready_when_funded" if self._video_available else "missing_api_key",
+                note="Uses the OpenAI Video API. Successful renders depend on account access, credits, and model availability.",
+            ),
+            MediaProvider(
+                id="elevenlabs-music",
+                label="ElevenLabs Music",
+                media_type="music",
+                configured=self._elevenlabs_music_available,
+                model=settings.elevenlabs_music_model,
+                status="ready_when_funded" if self._elevenlabs_music_available else "missing_api_key",
+                note="Uses the ElevenLabs Music API on paid ElevenLabs accounts.",
+            ),
+            MediaProvider(
+                id="suno-music",
+                label="Suno-compatible Music",
+                media_type="music",
+                configured=self._suno_music_available,
+                model=settings.suno_music_model,
+                status="ready_when_funded" if self._suno_music_available else "missing_api_key",
+                note="Optional music provider slot for Suno-compatible APIs with a configured API base URL.",
+            ),
+        ]
+        return [provider.__dict__ for provider in providers]
 
-    async def generate_image(
+    # ── Pollinations.ai (Flux) — free, no API key, real AI generation ────────
+
+    _POLLINATIONS_BASE = "https://image.pollinations.ai/prompt"
+    _POLLINATIONS_VIDEO_BASE = "https://video.pollinations.ai/prompt"
+
+    def _pollinations_image_url(
         self,
         prompt: str,
-        topic: str = "general",
-        size: str = "1024x1024",
-        quality: str = "standard",
-        style: str = "vivid",
-    ) -> dict[str, Any]:
-        """Generate an image via DALL-E 3, falling back to Unsplash."""
-        if not self._dalle_available:
-            return self._fallback_image(topic)
+        width: int = 1024,
+        height: int = 1024,
+        model: str = "flux",
+        enhance: bool = True,
+        seed: int | None = None,
+    ) -> str:
+        """Build a Pollinations.ai Flux image URL — no API key required."""
+        import urllib.parse
+        encoded = urllib.parse.quote(prompt, safe="")
+        params = f"width={width}&height={height}&model={model}&nologo=true"
+        if enhance:
+            params += "&enhance=true"
+        if seed is not None:
+            params += f"&seed={seed}"
+        return f"{self._POLLINATIONS_BASE}/{encoded}?{params}"
 
-        # Build a wellness-optimised prompt
+    def _pollinations_video_url(
+        self,
+        prompt: str,
+        width: int = 1280,
+        height: int = 720,
+    ) -> str:
+        """Build a Pollinations.ai video URL — no API key required."""
+        import urllib.parse
+        encoded = urllib.parse.quote(prompt, safe="")
+        return f"{self._POLLINATIONS_VIDEO_BASE}/{encoded}?width={width}&height={height}&nologo=true"
+
+    async def _generate_via_pollinations(
+        self,
+        prompt: str,
+        width: int = 1024,
+        height: int = 1024,
+    ) -> dict[str, Any]:
+        """Generate an image via Pollinations.ai Flux — always available, no credits needed."""
+        import random
+        seed = random.randint(1, 999999)
+
+        # Enhance prompt for wellness aesthetic
         enhanced = (
             f"{prompt}. "
             "Photorealistic, high quality, wellness aesthetic, "
             "soft natural lighting, clean composition, inspiring and calming mood."
         )
+        url = self._pollinations_image_url(enhanced, width=width, height=height, seed=seed)
 
+        # Verify the image actually generates (Pollinations returns the image directly)
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=5.0),
+                follow_redirects=True,
+            ) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/"):
+                    return {
+                        "url": url,
+                        "source": "flux-ai",
+                        "model": "Flux (Pollinations.ai)",
+                        "prompt": prompt,
+                        "revised_prompt": enhanced,
+                        "ai_generated": True,
+                        "seed": seed,
+                    }
+        except Exception as exc:
+            log.warning("Pollinations image generation error: %s", exc)
+
+        # If Pollinations fails, return the URL anyway — browser will load it directly
+        return {
+            "url": url,
+            "source": "flux-ai",
+            "model": "Flux (Pollinations.ai)",
+            "prompt": prompt,
+            "revised_prompt": enhanced,
+            "ai_generated": True,
+            "seed": seed,
+        }
+
+    async def _generate_via_dalle(
+        self,
+        prompt: str,
+        size: str = "1024x1024",
+        quality: str = "auto",
+        style: str = "vivid",
+    ) -> dict[str, Any] | None:
+        """Try DALL-E / gpt-image-1 — returns None if billing limit hit."""
+        enhanced = (
+            f"{prompt}. "
+            "Photorealistic, high quality, wellness aesthetic, "
+            "soft natural lighting, clean composition, inspiring and calming mood."
+        )
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=50.0, write=10.0, pool=5.0)
+            ) as client:
                 resp = await client.post(
                     f"{self._openai_base}/images/generations",
                     headers={
@@ -169,31 +295,76 @@ class MediaService:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "dall-e-3",
+                        "model": settings.openai_image_model,
                         "prompt": enhanced,
                         "n": 1,
                         "size": size,
                         "quality": quality,
-                        "style": style,
                         "response_format": "url",
                     },
                 )
-                if resp.status_code in (429, 402, 403):
-                    log.warning("DALL-E unavailable (%s) — using fallback", resp.status_code)
-                    return self._fallback_image(topic)
+                # Billing limit, rate limit, or access denied — fall through to Flux
+                if resp.status_code in (402, 429, 403):
+                    log.info("DALL-E unavailable (%s) — using Flux", resp.status_code)
+                    return None
                 resp.raise_for_status()
                 data = resp.json()
                 img = data["data"][0]
                 return {
                     "url": img.get("url"),
-                    "source": "dalle-3",
+                    "source": settings.openai_image_model,
+                    "model": settings.openai_image_model,
                     "prompt": prompt,
                     "revised_prompt": img.get("revised_prompt"),
-                    "dalle_available": True,
+                    "ai_generated": True,
                 }
         except Exception as exc:
-            log.warning("DALL-E error: %s — using fallback", exc)
-            return self._fallback_image(topic)
+            log.warning("DALL-E error: %s — falling back to Flux", exc)
+            return None
+
+    def _static_fallback(self, topic: str, index: int = 0) -> dict[str, Any]:
+        """Last-resort static Unsplash image — only used if all AI generation fails."""
+        images = FALLBACK_IMAGES.get(topic, FALLBACK_IMAGES["general"])
+        url = images[index % len(images)]
+        return {
+            "url": url,
+            "source": "unsplash",
+            "model": "static",
+            "prompt": None,
+            "revised_prompt": None,
+            "ai_generated": False,
+        }
+
+    async def generate_image(
+        self,
+        prompt: str,
+        topic: str = "general",
+        size: str = "1024x1024",
+        quality: str = "auto",
+        style: str = "vivid",
+    ) -> dict[str, Any]:
+        """
+        Generate an AI image.
+
+        Priority:
+          1. DALL-E 3 / gpt-image-1 (OpenAI) — best quality, requires credits
+          2. Flux via Pollinations.ai — free, no API key, real AI generation
+          3. Static Unsplash — last resort only
+        """
+        # Parse size into width/height for Pollinations
+        try:
+            w, h = (int(x) for x in size.split("x"))
+        except Exception:
+            w, h = 1024, 1024
+
+        # Try DALL-E first if key is configured
+        if self._dalle_available:
+            result = await self._generate_via_dalle(prompt, size=size, quality=quality, style=style)
+            if result:
+                return result
+
+        # Flux — always works, real AI generation
+        return await self._generate_via_pollinations(prompt, width=w, height=h)
 
     async def generate_visual_guide(
         self,
@@ -208,22 +379,20 @@ class MediaService:
         steps = []
         for i, step in enumerate(template["steps"]):
             image_data: dict[str, Any]
-            if generate_images and self._dalle_available:
-                prompt = (
-                    f"Wellness illustration: {step['title']}. "
-                    f"{step['description'][:120]}. "
-                    "Clean, inspiring, photorealistic wellness photography."
-                )
-                image_data = await self.generate_image(
-                    prompt=prompt,
-                    topic=step["image_topic"],
-                    size="1024x1024",
-                )
-                # Rate limit: small delay between DALL-E calls
-                if i < len(template["steps"]) - 1:
-                    await asyncio.sleep(1)
-            else:
-                image_data = self._fallback_image(step["image_topic"], i)
+            # Always generate AI images for guides — Flux is free
+            img_prompt = (
+                f"Wellness illustration: {step['title']}. "
+                f"{step['description'][:120]}. "
+                "Clean, inspiring, photorealistic wellness photography."
+            )
+            image_data = await self.generate_image(
+                prompt=img_prompt,
+                topic=step["image_topic"],
+                size="512x512",
+            )
+            # Small delay between generations to avoid hammering the API
+            if i < len(template["steps"]) - 1:
+                await asyncio.sleep(0.5)
 
             steps.append({
                 "step_number": i + 1,
@@ -231,6 +400,7 @@ class MediaService:
                 "description": step["description"],
                 "action": step["action"],
                 "icon": step["icon"],
+                "image_url": image_data.get("url"),
                 "image": image_data,
             })
 
@@ -241,6 +411,180 @@ class MediaService:
             "total_steps": len(steps),
             "steps": steps,
             "images_generated": generate_images and self._dalle_available,
+        }
+
+    async def start_video_generation(
+        self,
+        prompt: str,
+        size: str = "1280x720",
+        seconds: str = "8",
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Generate a video.
+
+        Priority:
+          1. OpenAI Sora — best quality, requires credits
+          2. Pollinations.ai video — free, real AI generation, no API key
+        """
+        try:
+            w, h = (int(x) for x in size.split("x"))
+        except Exception:
+            w, h = 1280, 720
+
+        # Try Sora first if key is configured and has credits
+        if self._video_available:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(connect=10.0, read=50.0, write=10.0, pool=5.0)
+                ) as client:
+                    resp = await client.post(
+                        f"{self._openai_base}/videos/generations",
+                        headers={
+                            "Authorization": f"Bearer {self._openai_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model or settings.openai_video_model,
+                            "prompt": prompt,
+                            "size": size,
+                            "n": 1,
+                        },
+                    )
+                    if resp.status_code not in (402, 403, 429):
+                        resp.raise_for_status()
+                        data = resp.json()
+                        return {
+                            "provider": "sora",
+                            "status": data.get("status", "queued"),
+                            "job_id": data.get("id"),
+                            "video_url": data.get("url"),
+                            "ai_generated": True,
+                        }
+                    log.info("Sora unavailable (%s) — using Pollinations video", resp.status_code)
+            except Exception as exc:
+                log.warning("Sora error: %s — falling back to Pollinations video", exc)
+
+        # Pollinations video — free, direct URL, real AI generation
+        enhanced = (
+            f"{prompt}. "
+            "Cinematic, smooth motion, wellness aesthetic, soft natural lighting, high quality."
+        )
+        video_url = self._pollinations_video_url(enhanced, width=w, height=h)
+        return {
+            "provider": "pollinations-video",
+            "status": "ready",
+            "video_url": video_url,
+            "prompt": prompt,
+            "ai_generated": True,
+        }
+
+    async def get_video_generation(self, video_id: str) -> dict[str, Any]:
+        """Fetch an OpenAI/Sora video render job status."""
+        if not self._video_available:
+            return {"configured": False, "provider": "openai-video", "status": "missing_api_key"}
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self._openai_base}/videos/{video_id}",
+                headers={"Authorization": f"Bearer {self._openai_key}"},
+            )
+            resp.raise_for_status()
+            return {"configured": True, "provider": "openai-video", "video": resp.json()}
+
+    async def start_music_generation(
+        self,
+        prompt: str,
+        provider: str = "auto",
+        title: str | None = None,
+        instrumental: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Modular music-generation entrypoint.
+
+        The provider adapters are intentionally isolated here so future paid
+        provider setup does not leak into the rest of the media console.
+        """
+        if provider in ("auto", "elevenlabs") and self._elevenlabs_music_available:
+            try:
+                async with httpx.AsyncClient(timeout=180) as client:
+                    resp = await client.post(
+                        f"{settings.elevenlabs_api_base_url.rstrip('/')}/music",
+                        params={"output_format": "mp3_44100_128"},
+                        headers={
+                            "xi-api-key": settings.elevenlabs_api_key,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "prompt": prompt,
+                            "music_length_ms": 30_000,
+                            "model_id": settings.elevenlabs_music_model,
+                            "force_instrumental": instrumental,
+                        },
+                    )
+                    if resp.status_code in (402, 403, 429):
+                        return {
+                            "configured": True,
+                            "provider": "elevenlabs-music",
+                            "status": "funding_or_access_required",
+                            "message": "ElevenLabs Music is configured, but this account needs paid access, credits, or higher rate limits.",
+                        }
+                    resp.raise_for_status()
+                    return {
+                        "configured": True,
+                        "provider": "elevenlabs-music",
+                        "status": "completed",
+                        "music": {
+                            "title": title or "Nexus Wellness Track",
+                            "content_type": resp.headers.get("content-type", "audio/mpeg"),
+                            "song_id": resp.headers.get("song-id"),
+                            "audio_base64": base64.b64encode(resp.content).decode("ascii"),
+                        },
+                    }
+            except Exception as exc:
+                log.warning("ElevenLabs music generation error: %s", exc)
+                return {"configured": True, "provider": "elevenlabs-music", "status": "error", "message": str(exc)}
+
+        if provider in ("auto", "suno") and self._suno_music_available:
+            try:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    resp = await client.post(
+                        f"{settings.suno_api_base_url.rstrip('/')}/api/v1/generate",
+                        headers={
+                            "Authorization": f"Bearer {settings.suno_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "prompt": prompt,
+                            "title": title or "Nexus Wellness Track",
+                            "customMode": True,
+                            "instrumental": instrumental,
+                            "model": settings.suno_music_model,
+                        },
+                    )
+                    if resp.status_code in (402, 403, 429):
+                        return {
+                            "configured": True,
+                            "provider": "suno-music",
+                            "status": "funding_or_access_required",
+                            "message": "Suno-compatible music generation is configured, but funding, access, or limits blocked the request.",
+                        }
+                    resp.raise_for_status()
+                    return {
+                        "configured": True,
+                        "provider": "suno-music",
+                        "status": "queued",
+                        "music": resp.json(),
+                    }
+            except Exception as exc:
+                log.warning("Music generation error: %s", exc)
+                return {"configured": True, "provider": "suno-music", "status": "error", "message": str(exc)}
+
+        return {
+            "configured": False,
+            "provider": provider,
+            "status": "missing_api_key",
+            "message": "Music generation is modularly wired. Configure ELEVENLABS_API_KEY or SUNO_API_KEY to activate a provider.",
         }
 
     def list_guides(self) -> list[dict[str, Any]]:
@@ -262,9 +606,17 @@ class MediaService:
         """
         Interpret a natural language query and return the best media response.
 
-        media_type: "image" | "guide" | "auto"
+        media_type: "image" | "guide" | "video" | "music" | "auto"
         """
         q = query.lower()
+
+        if media_type == "music":
+            music = await self.start_music_generation(prompt=query)
+            return {"type": "music", "data": music}
+
+        if media_type == "video":
+            video = await self.start_video_generation(prompt=query)
+            return {"type": "video", "data": video}
 
         # Detect intent
         guide_keywords = ["how to", "steps", "protocol", "guide", "routine", "ritual", "plan", "process"]

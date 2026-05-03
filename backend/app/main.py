@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.routers import astrology, auth, detox, meat_substitutes, media, meditation, nexus, nutrition, users, voice
+from app.routers import astrology, auth, body_profile, detox, food_medicine, meat_substitutes, media, meditation, nexus, nutrition, users, voice
 
 log = structlog.get_logger()
 
@@ -85,6 +85,8 @@ app.include_router(nexus.router, prefix=API_PREFIX)
 app.include_router(voice.router, prefix=API_PREFIX)
 app.include_router(meat_substitutes.router, prefix=API_PREFIX)
 app.include_router(media.router, prefix=API_PREFIX)
+app.include_router(food_medicine.router, prefix=API_PREFIX)
+app.include_router(body_profile.router, prefix=API_PREFIX)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────

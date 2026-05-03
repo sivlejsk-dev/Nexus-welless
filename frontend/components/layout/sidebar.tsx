@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Brain, Leaf, Star, Droplets, Sparkles,
-  ChefHat, Monitor, User, LogOut,
+  ChefHat, Monitor, User, LogOut, Stethoscope, BarChart3, Eye,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -15,21 +16,38 @@ const NAV_ITEMS = [
   { href: "/console",       label: "Console",       icon: Monitor,         color: "text-indigo-400"  },
   { href: "/meditation",    label: "Meditation",    icon: Brain,           color: "text-sky-400"     },
   { href: "/nutrition",     label: "Nutrition",     icon: Leaf,            color: "text-emerald-400" },
+  { href: "/food-medicine", label: "Food Medicine", icon: Stethoscope,     color: "text-emerald-400" },
+  { href: "/body-profile",  label: "Body Profile",  icon: BarChart3,       color: "text-violet-400"  },
   { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat,         color: "text-emerald-400" },
   { href: "/detox",         label: "Detox",         icon: Droplets,        color: "text-cyan-400"    },
   { href: "/astrology",     label: "Astrology",     icon: Star,            color: "text-amber-400"   },
 ];
 
 const MOBILE_NAV = ["/dashboard", "/nexus", "/meditation", "/nutrition", "/astrology"];
+const FAB_HIDDEN_KEY = "nexus_fab_hidden";
+const FAB_VISIBILITY_EVENT = "nexus-fab-visibility";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const [fabHidden, setFabHidden] = useState(false);
 
   const handleLogout = () => { logout(); router.push("/login"); };
   const isActive = (href: string) =>
     pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+  const restoreFab = () => {
+    localStorage.removeItem(FAB_HIDDEN_KEY);
+    setFabHidden(false);
+    window.dispatchEvent(new Event(FAB_VISIBILITY_EVENT));
+  };
+
+  useEffect(() => {
+    const syncFabVisibility = () => setFabHidden(localStorage.getItem(FAB_HIDDEN_KEY) === "true");
+    syncFabVisibility();
+    window.addEventListener(FAB_VISIBILITY_EVENT, syncFabVisibility);
+    return () => window.removeEventListener(FAB_VISIBILITY_EVENT, syncFabVisibility);
+  }, []);
 
   return (
     <>
@@ -69,6 +87,13 @@ export function Sidebar() {
         </nav>
 
         <div className="px-3 py-4 border-t border-white/5 flex-shrink-0 space-y-1">
+          {fabHidden && (
+            <button onClick={restoreFab}
+              className="w-full group flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white/35 hover:text-violet-300 hover:bg-violet-500/8 transition-all">
+              <Eye className="w-4 h-4 flex-shrink-0" />
+              <span>Show floating Nexus</span>
+            </button>
+          )}
           <Link href="/profile"
             className={cn(
               "group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
@@ -91,6 +116,13 @@ export function Sidebar() {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around px-1 py-2 safe-area-pb"
         style={{ background: "rgba(7,7,15,0.95)", backdropFilter: "blur(24px)", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        {fabHidden && (
+          <button onClick={restoreFab}
+            className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-0 text-violet-300">
+            <Eye className="w-5 h-5 flex-shrink-0" />
+            <span className="text-[9px] font-medium truncate">Show</span>
+          </button>
+        )}
         {NAV_ITEMS.filter((item) => MOBILE_NAV.includes(item.href)).map(({ href, label, icon: Icon, color }) => {
           const active = isActive(href);
           return (

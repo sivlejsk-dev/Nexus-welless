@@ -8,7 +8,7 @@ import { useVoice } from "@/lib/use-voice";
 import { VoiceButton, VoiceStatusLabel } from "@/components/ui/voice-button";
 import {
   Sparkles, Send, Brain, Leaf, Star, Droplets, Mic,
-  Settings2, ChefHat, X, History, Trash2,
+  Settings2, ChefHat, X, History, Trash2, ImageIcon, Video, BookOpen, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,12 +31,152 @@ const SUGGESTIONS = [
   "How do I make a plant-based burger that tastes like beef?",
 ];
 
+interface MediaPayload {
+  type: "image" | "video" | "guide";
+  // image fields
+  url?: string;
+  prompt?: string;
+  source?: string;
+  // video fields
+  job_id?: string;
+  status?: string;
+  video_url?: string;
+  // guide fields
+  title?: string;
+  steps?: { title: string; description: string; action: string; image_url?: string; icon?: string }[];
+}
+
 interface Message {
   id: string;
   role: "user" | "nexus";
   content: string;
+  media?: MediaPayload;
   via?: "text" | "voice" | "history";
   ts: Date;
+}
+
+/** Renders image, video, or visual guide payloads inline in the chat. */
+function MediaRenderer({ media }: { media: MediaPayload }) {
+  if (media.type === "image") {
+    const modelLabel = (media as MediaPayload & { model?: string }).model;
+    const isAI = (media as MediaPayload & { ai_generated?: boolean }).ai_generated;
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <ImageIcon className="w-3 h-3" />
+          {isAI ? `AI-generated image${modelLabel ? ` · ${modelLabel}` : ""}` : "Image"}
+        </div>
+        {media.url ? (
+          <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-white/5 max-w-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={media.url}
+              alt={media.prompt ?? "AI generated image"}
+              className="w-full rounded-2xl object-cover"
+              loading="lazy"
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 py-2 flex items-center justify-between">
+              {media.prompt && (
+                <p className="text-white/50 text-[10px] truncate flex-1 mr-2">{media.prompt}</p>
+              )}
+              {media.url && (
+                <a href={media.url} target="_blank" rel="noopener noreferrer"
+                  className="text-white/40 hover:text-white transition-colors flex-shrink-0">
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-white/40 text-sm bg-white/5 rounded-xl p-3 border border-white/10">
+            <ImageIcon className="w-4 h-4 flex-shrink-0" />
+            <span>Image unavailable — see description above.</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (media.type === "video") {
+    const provider = (media as MediaPayload & { provider?: string }).provider;
+    const isPollinationsReady = provider === "pollinations-video" && media.video_url;
+    const isSoraQueued = media.job_id && !media.video_url;
+
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <Video className="w-3 h-3" />
+          {isPollinationsReady ? "AI-generated video (Flux)" : isSoraQueued ? "Sora video rendering…" : "Video generation"}
+        </div>
+        {isPollinationsReady ? (
+          <div className="rounded-2xl overflow-hidden border border-white/10 bg-black max-w-lg">
+            <video
+              src={media.video_url}
+              controls
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full rounded-2xl"
+              onError={(e) => {
+                // If video fails to load, show a link instead
+                const el = e.currentTarget;
+                const parent = el.parentElement;
+                if (parent) {
+                  parent.innerHTML = `<a href="${media.video_url}" target="_blank" rel="noopener" class="flex items-center gap-2 p-3 text-violet-400 text-sm hover:text-violet-300">Open video in new tab →</a>`;
+                }
+              }}
+            />
+            {media.prompt && (
+              <p className="text-white/30 text-[10px] px-3 py-1.5 border-t border-white/8">{media.prompt}</p>
+            )}
+          </div>
+        ) : isSoraQueued ? (
+          <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-3 space-y-1">
+            <p className="text-violet-300 text-sm font-medium">Sora render queued</p>
+            <p className="text-white/40 text-xs">Job: <span className="font-mono">{media.job_id}</span></p>
+            <p className="text-white/40 text-xs">Status: {media.status ?? "processing"} — renders take 1-3 minutes.</p>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-white/40 text-sm bg-white/5 rounded-xl p-3 border border-white/10">
+            <Video className="w-4 h-4 flex-shrink-0" />
+            <span>Video unavailable — see description above.</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (media.type === "guide" && media.steps && media.steps.length > 0) {
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-1.5 text-white/40 text-xs">
+          <BookOpen className="w-3 h-3" /> Visual guide
+        </div>
+        {media.title && <p className="text-white/80 font-semibold text-sm">{media.title}</p>}
+        <div className="space-y-2">
+          {media.steps.map((step, i) => (
+            <div key={i} className="bg-white/4 border border-white/8 rounded-xl p-3 space-y-1">
+              <div className="flex items-center gap-2">
+                {step.icon && <span className="text-base">{step.icon}</span>}
+                <p className="text-white/90 font-medium text-sm">{step.title}</p>
+              </div>
+              <p className="text-white/55 text-xs leading-relaxed">{step.description}</p>
+              {step.image_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={step.image_url} alt={step.title} className="w-full rounded-lg mt-1.5 object-cover max-h-40" />
+              )}
+              {step.action && (
+                <p className="text-emerald-400/80 text-xs mt-1">→ {step.action}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function TypingDots() {
@@ -163,8 +303,8 @@ export default function NexusPage() {
     setLoading(true);
     try {
       // Pass the active module so Nexus stays contextually focused.
-      const res: NexusChatResponse = await nexus.chat(msg, module === "general" ? undefined : module);
-      addMsg({ role: "nexus", content: res.response, via: "text" });
+      const res = await nexus.chat(msg, module === "general" ? undefined : module) as NexusChatResponse & { media?: MediaPayload };
+      addMsg({ role: "nexus", content: res.response, media: res.media ?? undefined, via: "text" });
     } catch {
       addMsg({ role: "nexus", content: "Something went wrong — please try again." });
     } finally {
@@ -323,6 +463,9 @@ export default function NexusPage() {
                 msg.role === "user" ? "bubble-user text-white" : "bubble-nexus text-white/80",
                 msg.via === "history" && "opacity-70"
               )}>
+                {msg.role === "nexus" && msg.media && (
+                  <MediaRenderer media={msg.media} />
+                )}
                 {msg.role === "nexus"
                   ? <NexusMarkdown content={msg.content} />
                   : msg.content

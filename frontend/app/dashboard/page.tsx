@@ -2,25 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { astrology, meditation, detox, nexus, Horoscope, MeditationGuide, DetoxProtocol } from "@/lib/api";
+import { astrology, meditation, detox, nexus, foodMedicine, Horoscope, MeditationGuide, DetoxProtocol } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import {
   Brain, Leaf, Star, Droplets, Sparkles, Clock, Zap, ChefHat,
-  Monitor, ArrowRight, User, LogOut, RefreshCw,
+  Monitor, ArrowRight, User, LogOut, RefreshCw, Stethoscope, BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
 const MODULE_CARDS = [
-  { href: "/nexus",         label: "Nexus AI",      icon: Sparkles,  gradient: "from-violet-500 to-indigo-600",  glow: "shadow-violet-500/25",  desc: "AI wellness guidance"    },
-  { href: "/meditation",    label: "Meditation",    icon: Brain,     gradient: "from-sky-500 to-blue-600",       glow: "shadow-sky-500/25",     desc: "Guided sessions"         },
-  { href: "/nutrition",     label: "Nutrition",     icon: Leaf,      gradient: "from-emerald-500 to-teal-600",   glow: "shadow-emerald-500/25", desc: "Food as medicine"        },
-  { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat,   gradient: "from-green-500 to-emerald-600",  glow: "shadow-green-500/25",   desc: "Plant-based recipes"     },
-  { href: "/astrology",     label: "Astrology",     icon: Star,      gradient: "from-amber-500 to-orange-500",   glow: "shadow-amber-500/25",   desc: "Cosmic guidance"         },
-  { href: "/detox",         label: "Detox",         icon: Droplets,  gradient: "from-cyan-500 to-sky-600",       glow: "shadow-cyan-500/25",    desc: "Cleanse protocols"       },
-  { href: "/console",       label: "Console",       icon: Monitor,   gradient: "from-indigo-500 to-violet-600",  glow: "shadow-indigo-500/25",  desc: "Visual intelligence"     },
+  { href: "/nexus",         label: "Nexus AI",      icon: Sparkles,    gradient: "from-violet-500 to-indigo-600",  glow: "shadow-violet-500/25",  desc: "AI wellness guidance"    },
+  { href: "/meditation",    label: "Meditation",    icon: Brain,       gradient: "from-sky-500 to-blue-600",       glow: "shadow-sky-500/25",     desc: "Guided sessions"         },
+  { href: "/nutrition",     label: "Nutrition",     icon: Leaf,        gradient: "from-emerald-500 to-teal-600",   glow: "shadow-emerald-500/25", desc: "Healing foods"           },
+  { href: "/food-medicine", label: "Food Medicine", icon: Stethoscope, gradient: "from-green-500 to-emerald-600",  glow: "shadow-green-500/25",   desc: "36 conditions & cures"   },
+  { href: "/body-profile",  label: "Body Profile",  icon: BarChart3,   gradient: "from-violet-600 to-purple-700",  glow: "shadow-violet-600/25",  desc: "Full wellness assessment"},
+  { href: "/plant-kitchen", label: "Plant Kitchen", icon: ChefHat,     gradient: "from-lime-500 to-green-600",     glow: "shadow-lime-500/25",    desc: "Plant-based recipes"     },
+  { href: "/astrology",     label: "Astrology",     icon: Star,        gradient: "from-amber-500 to-orange-500",   glow: "shadow-amber-500/25",   desc: "Cosmic guidance"         },
+  { href: "/detox",         label: "Detox",         icon: Droplets,    gradient: "from-cyan-500 to-sky-600",       glow: "shadow-cyan-500/25",    desc: "Cleanse protocols"       },
+  { href: "/console",       label: "Console",       icon: Monitor,     gradient: "from-indigo-500 to-violet-600",  glow: "shadow-indigo-500/25",  desc: "Visual intelligence"     },
 ];
 
 function SkeletonLine({ w = "full" }: { w?: string }) {
@@ -37,6 +39,7 @@ export default function DashboardPage() {
   const [greetingLoading, setGreetingLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [greeting, setGreeting] = useState("Good day");
+  const [conditions, setConditions] = useState<{ key: string; label: string }[]>([]);
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -49,6 +52,7 @@ export default function DashboardPage() {
       detox.protocols("gentle").then((p) => setProtocol(p[0] ?? null)),
       astrology.myHoroscope().then(setHoroscope).catch(() =>
         astrology.horoscope("Aries").then(setHoroscope).catch(() => {})),
+      foodMedicine.conditions().then((r) => setConditions(r.conditions)).catch(() => {}),
     ]).finally(() => setLoaded(true));
   }, []);
 
@@ -163,6 +167,104 @@ export default function DashboardPage() {
             </div>
           </Link>
         ))}
+      </div>
+
+      {/* ── Food as Medicine ────────────────────────────────────────────── */}
+      <div className="glass-card p-5 space-y-4 border border-emerald-500/10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-green-500/25 flex-shrink-0">
+              <Stethoscope className="w-4.5 h-4.5 text-white" />
+            </div>
+            <div>
+              <p className="text-white/90 font-semibold text-sm">Food as Medicine</p>
+              <p className="text-white/35 text-xs">36 conditions — root causes, healing foods &amp; protocols</p>
+            </div>
+          </div>
+          <Link href="/food-medicine">
+            <button className="text-emerald-400/60 hover:text-emerald-400 text-xs flex items-center gap-1 transition-colors whitespace-nowrap">
+              Open <ArrowRight className="w-3 h-3" />
+            </button>
+          </Link>
+        </div>
+
+        {/* Condition chips */}
+        <div className="flex flex-wrap gap-2">
+          {(loaded ? conditions.slice(0, 18) : Array.from({ length: 12 })).map((c, i) =>
+            loaded && c ? (
+              <Link key={(c as { key: string }).key} href={`/food-medicine`}>
+                <span className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/5 border border-white/10 text-white/55 hover:text-white hover:bg-emerald-500/10 hover:border-emerald-500/20 transition-all cursor-pointer">
+                  {(c as { label: string }).label}
+                </span>
+              </Link>
+            ) : (
+              <div key={i} className="skeleton h-7 w-20 rounded-full" />
+            )
+          )}
+          {loaded && conditions.length > 18 && (
+            <Link href="/food-medicine">
+              <span className="px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all cursor-pointer">
+                +{conditions.length - 18} more →
+              </span>
+            </Link>
+          )}
+        </div>
+
+        {/* Quick action row */}
+        <div className="flex gap-2 pt-1 border-t border-white/5">
+          <Link href="/food-medicine" className="flex-1">
+            <Button variant="secondary" size="sm" className="w-full">
+              <Stethoscope className="w-3.5 h-3.5" /> Analyse My Symptoms
+            </Button>
+          </Link>
+          <Link href="/food-medicine" className="flex-1">
+            <Button variant="ghost" size="sm" className="w-full">
+              <Leaf className="w-3.5 h-3.5" /> Browse Condition Library
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* ── Body Profile ─────────────────────────────────────────────────── */}
+      <div className="glass-card p-5 border border-violet-500/10">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+          {/* Left — icon + copy */}
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center shadow-lg shadow-violet-600/25 flex-shrink-0 mt-0.5">
+              <BarChart3 className="w-4.5 h-4.5 text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-white/90 font-semibold text-sm">Body Profile</p>
+              <p className="text-white/40 text-xs mt-0.5 leading-relaxed">
+                Complete your physical &amp; psychological profile — get BMI, TDEE, Big Five personality analysis, and a personalised 90-day wellness roadmap from Nexus AI.
+              </p>
+              {/* Metric teasers */}
+              <div className="flex flex-wrap gap-3 mt-3">
+                {[
+                  { label: "BMI & body composition" },
+                  { label: "Calorie needs (TDEE)" },
+                  { label: "Big Five personality" },
+                  { label: "Mental wellness score" },
+                  { label: "90-day roadmap" },
+                ].map(({ label }) => (
+                  <span key={label} className="flex items-center gap-1.5 text-xs text-white/40">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400/60 flex-shrink-0" />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Right — CTA */}
+          <div className="flex flex-col gap-2 flex-shrink-0 sm:w-40">
+            <Link href="/body-profile">
+              <Button size="sm" className="w-full">
+                <BarChart3 className="w-3.5 h-3.5" /> Start Assessment
+              </Button>
+            </Link>
+            <p className="text-white/20 text-[10px] text-center">Takes ~3 minutes</p>
+          </div>
+        </div>
       </div>
 
       {/* ── Content row ─────────────────────────────────────────────────── */}

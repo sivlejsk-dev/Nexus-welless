@@ -22,6 +22,7 @@ voice_chat() is a convenience wrapper that:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from typing import Any
@@ -124,7 +125,8 @@ class VoiceService:
         language: str | None,
     ) -> dict[str, Any]:
         mime = _mime_for(filename)
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        _stt_timeout = httpx.Timeout(connect=8.0, read=30.0, write=15.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=_stt_timeout) as client:
             files = {"file": (filename, io.BytesIO(audio_bytes), mime)}
             data: dict[str, str] = {"model": model, "response_format": "verbose_json"}
             if language:
@@ -162,27 +164,42 @@ class VoiceService:
         if not self._tts_configured:
             return None
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self._openai_base}/audio/speech",
-                    headers={
-                        "Authorization": f"Bearer {self._openai_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "input": text[:4096],
-                        "voice": voice,
-                        "response_format": TTS_RESPONSE_FORMAT,
-                        "speed": speed,
-                    },
-                )
-                resp.raise_for_status()
-                return resp.content
-        except Exception as exc:
-            log.warning("TTS synthesis failed: %s", exc)
-            return None
+        # Tighter timeout for TTS — 20s is plenty; 60s blocks the server
+        _tts_timeout = httpx.Timeout(connect=8.0, read=20.0, write=8.0, pool=5.0)
+
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=_tts_timeout) as client:
+                    resp = await client.post(
+                        f"{self._openai_base}/audio/speech",
+                        headers={
+                            "Authorization": f"Bearer {self._openai_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "input": text[:4096],
+                            "voice": voice,
+                            "response_format": TTS_RESPONSE_FORMAT,
+                            "speed": speed,
+                        },
+                    )
+                    if resp.status_code == 429:
+                        # Rate limited — wait briefly then retry once, then give up
+                        if attempt == 0:
+                            await asyncio.sleep(2)
+                            continue
+                        log.warning("TTS rate limited after retry — skipping audio")
+                        return None
+                    resp.raise_for_status()
+                    return resp.content
+            except asyncio.TimeoutError:
+                log.warning("TTS timeout on attempt %d — skipping audio", attempt + 1)
+                return None
+            except Exception as exc:
+                log.warning("TTS synthesis failed: %s", exc)
+                return None
+        return None
 
     # ── Combined voice chat ───────────────────────────────────────────────────
 

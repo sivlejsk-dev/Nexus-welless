@@ -10,6 +10,7 @@ All chat messages pass through the ConversationEngine (Task 1.1):
 """
 
 import json
+import re
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
@@ -23,7 +24,53 @@ from app.services.reasoning import reasoning_service
 from app.services.rag import rag_service
 from app.services.session_store import session_store
 from app.services.nexus import nexus_service
+from app.services.media import media_service
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ── Media intent detection ────────────────────────────────────────────────────
+
+_IMAGE_PATTERNS = re.compile(
+    r"\b(generate|create|make|draw|render|show|paint|design|produce|give me)"
+    r".{0,30}(image|picture|photo|illustration|visual|artwork|graphic|poster|banner)\b"
+    r"|\b(image|picture|photo|illustration|artwork|graphic) of\b"
+    r"|\bvisuali[sz]e\b|\bdraw me\b|\bshow me a\b",
+    re.IGNORECASE,
+)
+
+_VIDEO_PATTERNS = re.compile(
+    r"\b(generate|create|make|render|produce|show|give me)"
+    r".{0,30}(video|animation|clip|reel|film|motion)\b"
+    r"|\b(video|animation|clip) of\b",
+    re.IGNORECASE,
+)
+
+_GUIDE_PATTERNS = re.compile(
+    r"\b(visual guide|step.by.step guide|show me how|walk me through|guide me through)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_media_intent(message: str) -> str | None:
+    """Return 'image', 'video', 'guide', or None."""
+    if _VIDEO_PATTERNS.search(message):
+        return "video"
+    if _GUIDE_PATTERNS.search(message):
+        return "guide"
+    if _IMAGE_PATTERNS.search(message):
+        return "image"
+    return None
+
+
+def _extract_topic(message: str) -> str:
+    """Best-effort topic extraction for image/video prompts."""
+    # Strip the action verb prefix and return the rest as the prompt
+    cleaned = re.sub(
+        r"^(please\s+)?(generate|create|make|draw|render|show|paint|design|produce|give me|visualize|visualise)\s+(me\s+)?(a\s+|an\s+)?(image|picture|photo|illustration|visual|artwork|graphic|video|animation|clip|poster|banner)?\s*(of\s+)?",
+        "",
+        message.strip(),
+        flags=re.IGNORECASE,
+    ).strip(" .,?!")
+    return cleaned or message
 
 router = APIRouter(prefix="/nexus", tags=["nexus-ai"])
 
@@ -51,6 +98,61 @@ async def chat(
             "conditions": json.loads(profile.conditions or "[]"),
         }
 
+    # ── Media intent interception ─────────────────────────────────────────
+    media_intent = _detect_media_intent(message)
+    if media_intent:
+        prompt = _extract_topic(message)
+
+        if media_intent == "video":
+            # Start video generation job and return immediately with job id
+            media_result = await media_service.start_video_generation(
+                prompt=prompt, size="1280x720", seconds="8"
+            )
+            # Also get a text response from Nexus to accompany the media
+            text_result = await nexus_service.chat(
+                user_id=str(current_user.id),
+                raw_message=message,
+                user_profile=profile_dict,
+                db=db,
+            )
+            return {
+                **text_result,
+                "media": {"type": "video", **media_result},
+            }
+
+        if media_intent == "guide":
+            # Match to a visual guide or fall back to image
+            media_result = await media_service.query_to_media(
+                query=prompt, media_type="guide"
+            )
+            text_result = await nexus_service.chat(
+                user_id=str(current_user.id),
+                raw_message=message,
+                user_profile=profile_dict,
+                db=db,
+            )
+            return {
+                **text_result,
+                "media": {"type": "guide", **media_result},
+            }
+
+        # Default: image
+        media_result = await media_service.generate_image(
+            prompt=prompt,
+            topic=_classify_topic(prompt),
+        )
+        text_result = await nexus_service.chat(
+            user_id=str(current_user.id),
+            raw_message=message,
+            user_profile=profile_dict,
+            db=db,
+        )
+        return {
+            **text_result,
+            "media": {"type": "image", **media_result},
+        }
+
+    # ── Standard text chat ────────────────────────────────────────────────
     result = await nexus_service.chat(
         user_id=str(current_user.id),
         raw_message=message,
@@ -58,6 +160,26 @@ async def chat(
         db=db,
     )
     return result
+
+
+def _classify_topic(prompt: str) -> str:
+    """Map a free-text prompt to a FALLBACK_IMAGES topic key."""
+    p = prompt.lower()
+    if any(w in p for w in ("food", "eat", "nutrition", "meal", "diet", "fruit", "vegetable", "recipe")):
+        return "nutrition"
+    if any(w in p for w in ("meditat", "breath", "mindful", "calm", "peace", "zen")):
+        return "meditation"
+    if any(w in p for w in ("detox", "cleanse", "juice", "fast")):
+        return "detox"
+    if any(w in p for w in ("herb", "plant", "flower", "nature", "garden", "leaf")):
+        return "herbs"
+    if any(w in p for w in ("cook", "kitchen", "chef", "bake", "recipe")):
+        return "cooking"
+    if any(w in p for w in ("fitness", "workout", "exercise", "gym", "yoga", "stretch")):
+        return "fitness"
+    if any(w in p for w in ("sleep", "rest", "night", "dream", "insomnia")):
+        return "sleep"
+    return "general"
 
 
 @router.get("/session")
