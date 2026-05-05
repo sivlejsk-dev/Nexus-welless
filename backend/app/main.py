@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.routers import astrology, auth, body_profile, detox, food_medicine, meat_substitutes, media, meditation, nexus, nutrition, users, voice
+from app.routers import astrology, auth, body_profile, detox, food_medicine, meat_substitutes, media, meditation, nexus, nutrition, users, voice, market_intelligence, simulation
 
 log = structlog.get_logger()
 
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
     from app.db.base import engine, Base
     from app.models.user import User, WellnessProfile, MeditationSession, DetoxLog  # noqa: F401
     from app.models.session import ChatSession, ChatTurn  # noqa: F401
+    from app.models.simulation import SimulationRun, SimulationPrediction, SimulationOutcomeRecord  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -87,6 +88,8 @@ app.include_router(meat_substitutes.router, prefix=API_PREFIX)
 app.include_router(media.router, prefix=API_PREFIX)
 app.include_router(food_medicine.router, prefix=API_PREFIX)
 app.include_router(body_profile.router, prefix=API_PREFIX)
+app.include_router(market_intelligence.router, prefix=API_PREFIX)
+app.include_router(simulation.router, prefix=API_PREFIX)
 
 
 # ── Health check ─────────────────────────────────────────────────────────────
@@ -102,5 +105,5 @@ async def root():
         "name": "Nexus Wellness Platform API",
         "version": "1.0.0",
         "docs": "/docs",
-        "modules": ["auth", "users", "meditation", "nutrition", "astrology", "detox", "nexus-ai"],
+        "modules": ["auth", "users", "meditation", "nutrition", "astrology", "detox", "nexus-ai", "market-intel", "simulation"],
     }

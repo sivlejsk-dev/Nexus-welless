@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -68,6 +68,23 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     aws_s3_bucket: str = "nexus-wellness-media"
     aws_region: str = "us-east-1"
+
+    # ── Market Intelligence ──────────────────────────────────
+    # News APIs
+    newsapi_key: str = ""
+    # Social Media
+    twitter_bearer_token: str = ""
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
+    # Financial data & sentiment
+    finnhub_api_key: str = ""
+    alphavantage_key: str = ""
+    polygon_api_key: str = ""
+    # Market data
+    yahoo_api_key: str = ""
+    # Optional: specialized sentiment providers
+    stocktwits_access_token: str = ""
+    marketaux_api_key: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod

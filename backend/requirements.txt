@@ -29,10 +29,15 @@ httpx==0.28.1
 # AI / ML
 openai==1.57.4          # Nexus-compatible OpenAI-spec client
 numpy==1.26.4
+scipy==1.13.1
 scikit-learn==1.5.2
 chromadb==0.5.23        # Vector store for RAG memory layer
 aiosqlite==0.20.0       # Async SQLite driver for dev/test
 textblob==0.18.0
+
+# Market data & simulation
+yfinance==0.2.49        # Yahoo Finance historical data
+pandas==2.2.3           # Data analysis (used by yfinance)
 
 # Astrology / Ephemeris
 pyswisseph==2.10.3.2    # Swiss Ephemeris bindings

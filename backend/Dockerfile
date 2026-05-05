@@ -5,6 +5,7 @@ WORKDIR /app
 # System deps for psycopg2 and pyswisseph
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
